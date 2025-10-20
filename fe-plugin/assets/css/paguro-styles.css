@@ -1,0 +1,92 @@
+/* Stili per l'Admin Panel */
+.paguro-admin-result {
+    margin-top: 15px;
+    padding: 10px;
+    border-radius: 4px;
+}
+
+/* Stili per il Chatbot Frontend */
+#paguro-chatbot-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 10000;
+    font-family: Arial, sans-serif;
+}
+
+#paguro-chatbot-toggle {
+    background-color: #0073aa;
+    color: white;
+    border: none;
+    padding: 15px 20px;
+    border-radius: 50px;
+    cursor: pointer;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+#paguro-chatbot-window {
+    width: 350px;
+    height: 450px;
+    background: #f9f9f9;
+    border-radius: 10px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
+    margin-top: 10px;
+}
+
+#paguro-chatbot-header {
+    padding: 10px;
+    background-color: #0073aa;
+    color: white;
+    font-weight: bold;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    text-align: center;
+}
+
+#paguro-chatbot-messages {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 10px;
+    background-color: white;
+}
+
+.paguro-user-msg, .paguro-bot-msg {
+    margin: 5px 0;
+    padding: 8px 12px;
+    border-radius: 15px;
+    max-width: 80%;
+    line-height: 1.4;
+}
+
+.paguro-user-msg {
+    background-color: #0073aa;
+    color: white;
+    align-self: flex-end;
+    margin-left: auto;
+}
+
+.paguro-bot-msg {
+    background-color: #e0e0e0;
+    color: #333;
+    align-self: flex-start;
+}
+
+#paguro-chatbot-input {
+    width: calc(100% - 70px);
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 0 0 0 10px;
+    box-sizing: border-box;
+}
+
+#paguro-chatbot-send {
+    width: 70px;
+    padding: 10px;
+    background-color: #0073aa;
+    color: white;
+    border: none;
+    border-radius: 0 0 10px 0;
+    cursor: pointer;
+}

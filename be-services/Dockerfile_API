@@ -1,0 +1,19 @@
+# Utilizziamo l'immagine base Python con Alpine per un'immagine piccola
+FROM python:3.10-alpine
+
+# Definisci la directory di lavoro
+WORKDIR /usr/src/app
+
+# Copia i requisiti e installa le dipendenze
+COPY ./src/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copia il codice sorgente dell'API
+COPY ./src/ .
+
+# Espone la porta interna 80 (mappata a 5000 dall'host tramite docker-compose)
+EXPOSE 80
+
+# Avvia l'applicazione con Gunicorn, che è più robusto del server Flask integrato
+# app:app significa: modulo 'app', variabile 'app' (l'istanza Flask)
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:80", "app:app"]
