@@ -7,21 +7,18 @@ services:
       context: .
       dockerfile: Dockerfile_API 
     container_name: paguro_api_service
-    # Mappa la porta interna 80 (dove gira l'API) sulla porta 5000 dell'host
     ports:
       - "5000:80" 
     environment:
-      # Credenziali DB e Token di sicurezza (caricate dal file .env)
       - API_TOKEN=${PAGURO_API_TOKEN}
       - DB_HOST=paguro_db
       - DB_USER=${DB_USER}
       - DB_PASS=${DB_PASS}
       - DB_NAME=${DB_NAME}
-      - OLLAMA_HOST=ollama:11434 # L'API parla con Ollama tramite la rete Docker
+      - OLLAMA_HOST=ollama:11434 
     depends_on:
       - paguro_db
       - ollama
-    # Assicurati che l'API si riavvii in caso di crash
     restart: always
 
   # Servizio 2: Database (PostgreSQL raccomandato)
@@ -33,18 +30,23 @@ services:
       - POSTGRES_PASSWORD=${DB_PASS}
       - POSTGRES_DB=${DB_NAME}
     volumes:
-      - db_data:/var/lib/postgresql/data # Persistenza dei dati
+      - db_data:/var/lib/postgresql/data 
     restart: always
 
   # Servizio 3: LLM (Ollama)
   ollama:
     image: ollama/ollama
     container_name: paguro_ollama_service
-    # Il BE parla con Ollama tramite la rete Docker, non serve esporre porte esterne.
     volumes:
       - ollama_data:/root/.ollama
-    # Importa il modello LLM che preferisci (es. llama2:7b) all'avvio
-    command: serve
+    # FIX: Avvia il server e pulla il modello phi3 automaticamente
+    command: >
+      /bin/sh -c "
+        (ollama serve &)
+        sleep 5
+        ollama pull phi3:3.8b # MODELLO LEGGERO
+        wait
+      "
     restart: always
 
 # Volumi per la persistenza dei dati

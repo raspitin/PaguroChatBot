@@ -5,7 +5,7 @@ if ( ! defined( 'WPINC' ) ) {
 }
 
 class Paguro_Admin {
-
+    // ... (add_plugin_admin_menu omesso per brevità, è corretto) ...
     public function add_plugin_admin_menu() {
         add_menu_page(
             'Paguro ChatBot',
@@ -56,6 +56,14 @@ class Paguro_Admin {
             'paguro-main'
         );
 
+        // NUOVA SEZIONE: Controllo Visualizzazione
+        add_settings_section(
+            'paguro_display_section', 
+            'Controllo Visualizzazione Chatbot', 
+            array( $this, 'display_section_callback' ), 
+            'paguro-main'
+        );
+
         add_settings_field(
             'backend_url', 
             'URL API (Backend)', 
@@ -71,8 +79,18 @@ class Paguro_Admin {
             'paguro-main', 
             'paguro_api_section'
         );
-    }
 
+        // NUOVO CAMPO: Interruttore Globale
+        add_settings_field(
+            'global_display_enabled', 
+            'Mostra Chatbot su tutte le pagine', 
+            array( $this, 'global_display_callback' ), 
+            'paguro-main', 
+            'paguro_display_section'
+        );
+    }
+    
+    // ... (api_section_callback, backend_url_callback, api_token_callback omessi per brevità) ...
     public function api_section_callback() {
         echo '<p>Inserisci l\'URL del tuo Backend Dockerizzato (es. <code>https://api.viamerano24.it</code>) e il Token di sicurezza.</p>';
     }
@@ -86,11 +104,22 @@ class Paguro_Admin {
 
     public function api_token_callback() {
         $options = get_option( 'paguro_settings' );
-        // Mostra solo le ultime 4 cifre per sicurezza
         $token = isset( $options['api_token'] ) ? $options['api_token'] : '';
         $display_token = (strlen($token) > 4) ? '************' . substr($token, -4) : $token;
         echo "<input type='text' id='paguro_api_token' name='paguro_settings[api_token]' value='{$token}' class='regular-text' placeholder='Il Token deve essere uguale a PAGURO_API_TOKEN nel file .env del BE' />";
         echo '<p class="description">Questo token è usato per l\'autenticazione delle richieste amministrative (CRUD).</p>';
+    }
+    
+    // NUOVI CALLBACKS
+    public function display_section_callback() {
+        echo '<p>Gestisci come e dove il chatbot dovrebbe apparire sul tuo sito.</p>';
+    }
+
+    public function global_display_callback() {
+        $options = get_option( 'paguro_settings' );
+        $checked = isset( $options['global_display_enabled'] ) ? checked( 1, $options['global_display_enabled'], false ) : '';
+        echo "<input type='checkbox' name='paguro_settings[global_display_enabled]' value='1' {$checked} />";
+        echo '<p class="description">Se abilitato, il chatbot apparirà come icona flottante su ogni pagina (tranne quelle che usano lo Shortcode per l\'incorporamento).</p>';
     }
     
     public function sanitize_paguro_settings( $input ) {
@@ -101,28 +130,32 @@ class Paguro_Admin {
         if ( isset( $input['api_token'] ) ) {
             $output['api_token'] = sanitize_text_field( $input['api_token'] );
         }
+        // Sanitizza il campo checkbox
+        if ( isset( $input['global_display_enabled'] ) ) {
+            $output['global_display_enabled'] = 1;
+        } else {
+            // Importante per il checkbox non selezionato
+            $output['global_display_enabled'] = 0; 
+        }
         return $output;
     }
-
+    
+    // ... (resto dei metodi di enqueue, display_page e test_connection omessi, sono corretti) ...
     public function enqueue_styles_and_scripts( $hook_suffix ) {
-        // Carica script solo sulle pagine del plugin
         if ( strpos( $hook_suffix, 'paguro-' ) !== false ) {
             wp_enqueue_style( 'paguro-admin-style', PAGURO_PLUGIN_URL . 'assets/css/paguro-styles.css', array(), PAGURO_VERSION );
             
             wp_enqueue_script( 'paguro-admin-script', PAGURO_PLUGIN_URL . 'assets/js/paguro-admin.js', array( 'jquery' ), PAGURO_VERSION, true );
             
-            // Passa l'URL per l'AJAX test
             wp_localize_script( 'paguro-admin-script', 'PaguroAdmin', array(
                 'ajaxurl' => admin_url( 'admin-ajax.php' ),
                 'nonce'   => wp_create_nonce( 'paguro_test_nonce' ),
-                'token'   => get_option( 'paguro_settings' )['api_token'] ?? '', // Passa il token direttamente
+                'token'   => get_option( 'paguro_settings' )['api_token'] ?? '', 
                 'url'     => get_option( 'paguro_settings' )['backend_url'] ?? '',
             ));
         }
     }
 
-    // --- Pagine del Pannello Admin ---
-    
     public function display_settings_page() {
         include PAGURO_PLUGIN_DIR . 'admin/admin-settings.php';
     }
@@ -134,8 +167,6 @@ class Paguro_Admin {
     public function display_chatbot_config_page() {
         include PAGURO_PLUGIN_DIR . 'admin/admin-crud-chatbot.php';
     }
-
-    // --- AJAX Handler per il Test ---
 
     public function test_backend_connection() {
         check_ajax_referer( 'paguro_test_nonce', 'security' );
@@ -152,7 +183,6 @@ class Paguro_Admin {
             ) );
         }
         
-        // Risposta attesa dal BE: {"status": "OK", "message": "..."}
         if ( isset( $result['status'] ) && $result['status'] === 'OK' ) {
             wp_send_json_success( array( 'message' => 'Connessione al Backend riuscita e Token API accettato!' ) );
         } else {

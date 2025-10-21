@@ -57,14 +57,14 @@ echo "✅ Token API caricato."
 # 3. Download Modello Ollama (Opzionale, ma consigliato)
 # ---------------------------------------------------------
 
-echo -e "\n--- 3. Pre-caricamento Modello Ollama (llama2) ---"
+echo -e "\n--- 3. Pre-caricamento Modello Ollama (phi3:3.8b) ---"
 
 # Pull Ollama per garantire che il modello sia disponibile prima dell'avvio completo
 docker pull ollama/ollama:latest
 
 # Scarica il modello che verrà usato dal servizio Ollama (es. llama2)
-docker run --rm -v ollama_data:/root/.ollama ollama/ollama pull llama2:7b
-echo "✅ Modello llama2 pre-caricato in ollama_data."
+docker run --rm -v ollama_data:/root/.ollama ollama/ollama pull phi3:3.8b
+echo "✅ Modello phi3:3.8b pre-caricato in ollama_data."
 
 # ---------------------------------------------------------
 # 4. Avvio dei Servizi Docker

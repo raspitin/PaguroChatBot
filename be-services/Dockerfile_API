@@ -1,3 +1,4 @@
+# Dockerfile per un'applicazione Python/Flask con Gunicorn
 # Utilizziamo l'immagine base Python con Alpine per un'immagine piccola
 FROM python:3.10-alpine
 
@@ -11,9 +12,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia il codice sorgente dell'API
 COPY ./src/ .
 
-# Espone la porta interna 80 (mappata a 5000 dall'host tramite docker-compose)
+# Espone la porta interna 80
 EXPOSE 80
 
-# Avvia l'applicazione con Gunicorn, che è più robusto del server Flask integrato
-# app:app significa: modulo 'app', variabile 'app' (l'istanza Flask)
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:80", "app:app"]
+# FIX: Aumenta il timeout a 300s e riduci i worker a 2 per risparmiare memoria (8GB RAM)
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:80", "--timeout", "300", "app:app"]
+
+

@@ -10,7 +10,6 @@ class Paguro_API_Client {
     private $api_token;
 
     public function __construct() {
-        // Recupera le configurazioni dal DB di WordPress (salvate tramite il pannello admin)
         $settings = get_option( 'paguro_settings' );
         $this->base_url = isset( $settings['backend_url'] ) ? trailingslashit( $settings['backend_url'] ) . 'api/v1/' : '';
         $this->api_token = isset( $settings['api_token'] ) ? $settings['api_token'] : '';
@@ -18,9 +17,6 @@ class Paguro_API_Client {
 
     /**
      * Metodo generico per effettuare chiamate API.
-     * @param string $endpoint L'endpoint da chiamare (es. 'disponibilita').
-     * @param array $args Parametri aggiuntivi per wp_remote_request.
-     * @return array|WP_Error La risposta decodificata o un errore di WP.
      */
     private function remote_request( $endpoint, $args ) {
         if ( empty( $this->base_url ) ) {
@@ -29,18 +25,15 @@ class Paguro_API_Client {
 
         $url = $this->base_url . $endpoint;
         
-        // Intestazioni richieste (inclusa l'autorizzazione con Token)
         $headers = array(
             'Content-Type' => 'application/json',
-            // Per le API amministrative che richiedono sicurezza (CRUD/Test)
             'Authorization' => 'Bearer ' . $this->api_token, 
         );
 
-        // Aggiungi o sovrascrivi le intestazioni fornite
         $args['headers'] = array_merge( $headers, ( isset( $args['headers'] ) ? $args['headers'] : array() ) );
         
-        // Imposta il timeout
-        $args['timeout'] = 30; // 30 secondi per Ollama/operazioni lunghe
+        // FIX: Aumenta il timeout a 300 secondi (5 minuti) per le richieste Ollama pesanti
+        $args['timeout'] = 300; 
 
         $response = wp_remote_request( $url, $args );
 
@@ -59,33 +52,22 @@ class Paguro_API_Client {
         }
     }
 
-    /**
-     * Effettua un test di connettività semplice.
-     */
     public function test_connection() {
-        // Endpoint di test semplice che DEVE richiedere il Token API per verificare l'autenticazione.
         return $this->remote_request( 'admin/status', array( 'method' => 'GET' ) );
     }
 
-    /**
-     * Invia una query generica al servizio Ollama.
-     */
     public function send_ollama_query( $query ) {
         $body = json_encode( array( 'query' => $query ) );
         
-        // Questo endpoint Ollama NON necessita del Token (solo CORS/HTTPS per il frontend)
         $args = array(
             'method' => 'POST',
             'body' => $body,
-            'headers' => array( 'Authorization' => '' ), // Rimuove il token, se necessario
+            'headers' => array( 'Authorization' => '' ), // Rimuove il token
         );
         
         return $this->remote_request( 'ollama/query', $args );
     }
 
-    /**
-     * Verifica la disponibilità degli appartamenti.
-     */
     public function check_availability( $data_inizio, $data_fine, $appartamento_id ) {
         $body = json_encode( array( 
             'data_inizio' => $data_inizio, 
@@ -96,7 +78,7 @@ class Paguro_API_Client {
         $args = array(
             'method' => 'POST',
             'body' => $body,
-            'headers' => array( 'Authorization' => '' ), // Non richiede Token
+            'headers' => array( 'Authorization' => '' ), 
         );
 
         return $this->remote_request( 'disponibilita', $args );
