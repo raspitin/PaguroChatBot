@@ -1,0 +1,19 @@
+# ----------------------------------------------------------------------
+# Configurazioni Virtual Environment Python
+# ----------------------------------------------------------------------
+# La cartella 'env' che hai menzionato (se il tuo virtual environment si chiama così)
+env/
+# Nomi comuni per i virtual environment Python
+venv/
+.venv/
+.python-version
+
+# ----------------------------------------------------------------------
+# File e cartelle di Build (Comuni ai progetti Python/Generali)
+# ----------------------------------------------------------------------
+__pycache__/
+*.pyc
+*.o
+*.so
+.DS_Store # Mac OS
+/be-services/.env # Le variabili d'ambiente segrete

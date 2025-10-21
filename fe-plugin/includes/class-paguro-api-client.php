@@ -32,7 +32,7 @@ class Paguro_API_Client {
 
         $args['headers'] = array_merge( $headers, ( isset( $args['headers'] ) ? $args['headers'] : array() ) );
         
-        // FIX: Aumenta il timeout a 300 secondi (5 minuti) per le richieste Ollama pesanti
+        // Timeout aumentato a 300s per il cold start di Ollama
         $args['timeout'] = 300; 
 
         $response = wp_remote_request( $url, $args );
@@ -84,3 +84,4 @@ class Paguro_API_Client {
         return $this->remote_request( 'disponibilita', $args );
     }
 }
+// FINE DEL FILE. NESSUNA PARENTESI GRFFA AGGIUNTIVA.

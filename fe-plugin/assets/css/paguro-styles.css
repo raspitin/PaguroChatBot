@@ -5,12 +5,41 @@
     border-radius: 4px;
 }
 
-/* Stili per il Chatbot Frontend */
-#paguro-chatbot-container {
+/* --- STILI CHATBOT --- */
+
+/* Nasconde l'interruttore quando il chatbot è incorporato */
+.paguro-embedded #paguro-chatbot-toggle {
+    display: none; 
+}
+
+/* Stili per il contenitore quando è INCORPORATO (Shortcode) */
+.paguro-embedded {
+    /* ANNULLA IL FLOATING */
+    position: static !important;
+    bottom: auto !important;
+    right: auto !important;
+    margin: 20px auto; /* Centra nel contenuto */
+    box-shadow: none !important;
+    z-index: auto !important;
+}
+
+/* Rendi la finestra del chatbot visibile per lo Shortcode */
+.paguro-embedded #paguro-chatbot-window {
+    display: flex !important;
+    /* Rimuovi margini che disturbano il layout in-page */
+    margin-top: 0; 
+}
+
+/* Stili per il contenitore quando è FLOTTANTE (Globale) */
+.paguro-floating {
     position: fixed;
     bottom: 20px;
     right: 20px;
     z-index: 10000;
+}
+
+#paguro-chatbot-container {
+    /* Stili base applicati sia a floating che embedded */
     font-family: Arial, sans-serif;
 }
 
@@ -23,7 +52,7 @@
     cursor: pointer;
     box-shadow: 0 4px 8px rgba(0,0,0,0.15);
 }
-
+/* ... (il resto del CSS per header, messages, input, send rimane invariato) ... */
 #paguro-chatbot-window {
     width: 350px;
     height: 450px;
