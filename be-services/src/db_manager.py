@@ -13,15 +13,10 @@ class DBManager:
         self.DB_HOST = os.environ.get("DB_HOST")
         self.DB_PORT = os.environ.get("DB_PORT", "5432")
 
-        # Configura il pool di connessioni
         self.connection_pool = SimpleConnectionPool(
-            minconn=1, 
-            maxconn=10, 
-            database=self.DB_NAME,
-            user=self.DB_USER,
-            password=self.DB_PASS,
-            host=self.DB_HOST,
-            port=self.DB_PORT
+            minconn=1, maxconn=10, 
+            database=self.DB_NAME, user=self.DB_USER,
+            password=self.DB_PASS, host=self.DB_HOST, port=self.DB_PORT
         )
         self.initialize_tables()
 
@@ -36,9 +31,7 @@ class DBManager:
 
     def initialize_tables(self):
         """
-        Crea le tabelle se non esistono. 
-        Implementa una gestione dell'errore per ignorare i conflitti di sequenza
-        che causano il crash all'avvio (Fatal Error).
+        Crea le tabelle se non esistono, con tolleranza d'errore per i conflitti di sequenza.
         """
         sql_appartamenti = """
         CREATE TABLE IF NOT EXISTS Appartamenti (
@@ -59,40 +52,24 @@ class DBManager:
             UNIQUE (appartamento_id, data_inizio, data_fine)
         );
         """
-        # Lista di errori che vogliamo ignorare durante la creazione
-        errors_to_ignore = [
-            "duplicate key value violates unique constraint",
-            "already exists"
-        ]
+        errors_to_ignore = ["duplicate key value violates unique constraint", "already exists"]
         
         try:
             with self.get_conn() as conn:
                 with conn.cursor() as cur:
                     # 1. Tenta la creazione di Appartamenti
-                    try:
-                        cur.execute(sql_appartamenti)
-                        print("DBManager: Tabella Appartamenti inizializzata o già esistente.")
+                    try: cur.execute(sql_appartamenti)
                     except Exception as e:
-                        if any(err in str(e) for err in errors_to_ignore):
-                            print("DBManager: Avviso - Tabella Appartamenti o sequenza già esistente (Ignorato).")
-                        else:
-                            raise e 
-                        
+                        if any(err in str(e) for err in errors_to_ignore): print("DBManager: Avviso - Tabella Appartamenti già esistente (Ignorato).")
+                        else: raise e 
                     # 2. Tenta la creazione di Prenotazioni
-                    try:
-                        cur.execute(sql_prenotazioni)
-                        print("DBManager: Tabella Prenotazioni inizializzata o già esistente.")
+                    try: cur.execute(sql_prenotazioni)
                     except Exception as e:
-                        # Ignora anche errori di FK se l'altra tabella non è stata creata subito
-                        if any(err in str(e) for err in errors_to_ignore) or "reference to a non-existent" in str(e):
-                            print("DBManager: Avviso - Tabella Prenotazioni già esistente (Ignorato).")
-                        else:
-                            raise e
+                        if any(err in str(e) for err in errors_to_ignore) or "reference to a non-existent" in str(e): print("DBManager: Avviso - Tabella Prenotazioni già esistente (Ignorato).")
+                        else: raise e
 
                 conn.commit()
-            
         except Exception as e:
-            # Errore critico non gestito (es. DB irraggiungibile)
             print(f"DBManager: Errore critico non gestito all'avvio del DB: {e}")
             raise e
     
@@ -110,68 +87,87 @@ class DBManager:
     def create_appartamento(self, nome, max_ospiti):
         with self.get_conn() as conn:
             with conn.cursor() as cur:
-                # La clausola RETURNING id è cruciale per ottenere l'ID creato
                 cur.execute(
                     "INSERT INTO Appartamenti (nome, max_ospiti) VALUES (%s, %s) RETURNING id;",
                     (nome, max_ospiti)
                 )
                 conn.commit()
                 return cur.fetchone()[0]
+
+    def update_appartamento(self, apt_id, nome, max_ospiti):
+        """Aggiorna il nome e max_ospiti di un appartamento esistente."""
+        # NOTA: Accetta 3 parametri espliciti (4 totali con self)
+        with self.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE Appartamenti SET nome = %s, max_ospiti = %s WHERE id = %s;",
+                    (nome, max_ospiti, apt_id)
+                )
+                conn.commit()
+                return cur.rowcount
     
-    # [TODO]: Implementare delete/update appartamenti
+    def delete_appartamento(self, apt_id):
+        """Elimina logicamente (disattiva) un appartamento."""
+        with self.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE Appartamenti SET attivo = FALSE WHERE id = %s;", (apt_id,))
+                conn.commit()
+                return cur.rowcount
 
     # =========================================================
-    # CRUD: PRENOTAZIONI / OCCUPAZIONI
+    # CRUD: PRENOTAZIONI / OCCUPAZIONI (Omessi)
     # =========================================================
     
     def get_occupazioni_by_apartment(self, apartment_id):
-        sql = """
-        SELECT id, data_inizio, data_fine, nome_cliente, status 
-        FROM Prenotazioni 
-        WHERE appartamento_id = %s 
-        ORDER BY data_inizio;
-        """
         with self.get_conn() as conn:
             with conn.cursor() as cur:
+                sql = """
+                SELECT id, data_inizio, data_fine, nome_cliente, status 
+                FROM Prenotazioni 
+                WHERE appartamento_id = %s 
+                ORDER BY data_inizio;
+                """
                 cur.execute(sql, (apartment_id,))
                 occupations = cur.fetchall()
-                # Converte i risultati in un formato leggibile
                 return [{
-                    "id": o[0], 
-                    "data_inizio": o[1].isoformat(), 
-                    "data_fine": o[2].isoformat(), 
-                    "nome_cliente": o[3],
-                    "status": o[4]
+                    "id": o[0], "data_inizio": o[1].isoformat(), "data_fine": o[2].isoformat(), 
+                    "nome_cliente": o[3], "status": o[4]
                 } for o in occupations]
 
     def create_occupazione(self, apartment_id, start_date, end_date, client_name="Admin"):
-        sql = """
-        INSERT INTO Prenotazioni (appartamento_id, data_inizio, data_fine, nome_cliente) 
-        VALUES (%s, %s, %s, %s);
-        """
         with self.get_conn() as conn:
             with conn.cursor() as cur:
+                sql = """
+                INSERT INTO Prenotazioni (appartamento_id, data_inizio, data_fine, nome_cliente) 
+                VALUES (%s, %s, %s, %s);
+                """
                 cur.execute(sql, (apartment_id, start_date, end_date, client_name))
                 conn.commit()
-
+    
+    def delete_occupazione(self, occ_id):
+        """Elimina una singola occupazione (prenotazione)."""
+        with self.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM Prenotazioni WHERE id = %s;", (occ_id,))
+                conn.commit()
+                return cur.rowcount
 
     # =========================================================
-    # LOGICA: VERIFICA DISPONIBILITÀ
+    # LOGICA: VERIFICA DISPONIBILITÀ (Omessa)
     # =========================================================
 
     def check_overlap(self, apartment_id, start_date, end_date):
-        """Verifica se il periodo richiesto si sovrappone a una prenotazione esistente."""
         sql = """
         SELECT COUNT(*) 
         FROM Prenotazioni 
+        WHERE appartamento_id = %s
           AND status IN ('occupato', 'prenotato')
           AND NOT (data_fine <= %s OR data_inizio >= %s);
         """
-        
         try:
             with self.get_conn() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(sql, (apartment_id, start_date, end_date, start_date, end_date)) # I parametri erano sbagliati, corretti qui
+                    cur.execute(sql, (apartment_id, start_date, end_date))
                     overlap_count = cur.fetchone()[0]
                     return overlap_count > 0
         except Exception as e:

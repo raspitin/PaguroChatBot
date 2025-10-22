@@ -4,29 +4,39 @@ import logging
 import psycopg2
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
+from functools import wraps
 import requests
 from db_manager import DBManager 
 
 app = Flask(__name__)
 app.logger.setLevel(logging.ERROR) 
 
-# --- Configurazione CORS (VERSIONE DEFINITIVA) ---
-# FIX: Assicuriamo che la configurazione sia esplicita e che copra l'header Authorization.
+# --- INIZIALIZZAZIONE GLOBALE DEL DB MANAGER (FIX NameError) ---
+db_manager = None
+
+# --- Configurazione CORS (VERSIONE FINALE) ---
 CORS(app, resources={r"/api/*": {
-    # Permette origini specifiche (www.villaceli.it)
     "origins": ["https://www.villaceli.it", "https://villaceli.it"], 
-    # Permette tutti i metodi richiesti
     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], 
-    # ESSENZIALE: Permette il passaggio dell'header Authorization
     "allow_headers": ["Content-Type", "Authorization"],     
     "max_age": 86400  
 }})
 
+# --- Configurazione Ambiente ---
+API_TOKEN = os.environ.get("API_TOKEN")
+OLLAMA_HOST_ENV = os.environ.get("OLLAMA_HOST", "ollama:11434")
 
-# --- Middleware di Sicurezza: Verifica Token ---
+try:
+    db_manager = DBManager() 
+except Exception as e:
+    app.logger.error(f"FATAL: Impossibile connettersi o inizializzare il database: {e}")
+    db_manager = None 
+
+
+# --- Middleware di Sicurezza: Verifica Token (Invariata) ---
 def require_auth(f):
+    @wraps(f)
     def wrapper(*args, **kwargs):
-        # ... (Logica di verifica Token e DB omessa, invariata) ...
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
             return jsonify({"error": "Unauthorized", "message": "Missing or invalid Authorization header."}), 401
@@ -39,15 +49,26 @@ def require_auth(f):
             return jsonify({"error": "DB Error", "message": "Database non connesso o inizializzato."}), 500
             
         return f(*args, **kwargs)
-    wrapper.__name__ = f.__name__
     return wrapper
 
 # Funzione Placeholder: Logica di Prenotazione (Sabato)
-# ... (Logica omessa, invariata) ...
+def is_valid_booking_period(start_date_str, end_date_str):
+    try:
+        start_date = datetime.datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        end_date = datetime.datetime.strptime(end_date_str, '%Y-%m-%d').date()
+        
+        if start_date.weekday() != 5 or end_date.weekday() != 5:
+            return False, "Le date di check-in e check-out devono essere di Sabato."
+        
+        if end_date <= start_date:
+            return False, "La data di check-out deve essere successiva alla data di check-in."
 
-# =========================================================
-# ENDPOINT PUBBLICI (Chatbot FE)
-# ... (Logica omessa, invariata) ...
+        if (end_date - start_date).days % 7 != 0:
+             return False, "La prenotazione deve coprire settimane intere (multipli di 7 giorni)."
+        
+        return start_date.isoformat(), end_date.isoformat(), "Periodo valido."
+    except ValueError:
+        return None, None, "Formato data non valido. Usa YYYY-MM-DD."
 
 # =========================================================
 # ENDPOINT AMMINISTRATIVI (Pannello Admin - richiedono Token)
@@ -60,11 +81,10 @@ def admin_status():
 
 @app.route("/api/v1/admin/appartamenti", methods=["GET", "POST"])
 @require_auth
-def manage_appartamenti():
-    """CRUD: Ottiene o crea appartamenti."""
+def create_read_appartamenti():
     if request.method == "GET":
-        apartments = db_manager.get_appartamenti()
-        return jsonify({"appartamenti": apartments}), 200
+        appartamenti = db_manager.get_appartamenti()
+        return jsonify({"appartamenti": appartamenti}), 200
     
     elif request.method == "POST":
         data = request.get_json()
@@ -77,26 +97,51 @@ def manage_appartamenti():
             new_id = db_manager.create_appartamento(nome, max_ospiti)
             return jsonify({"message": "Appartamento creato", "id": new_id}), 201
         except psycopg2.errors.UniqueViolation:
-             return jsonify({"error": "Nome appartamento già esistente."}), 409 # Conflict
+             return jsonify({"error": "Nome appartamento già esistente."}), 409
         except Exception as e:
              app.logger.error(f"Errore creazione appartamento: {e}")
              return jsonify({"error": "Errore DB: Impossibile creare l'appartamento."}), 500
 
+# --- APPARTAMENTI: OPTIONS (Handler separato per il preflight) ---
+@app.route("/api/v1/admin/appartamenti/<int:apt_id>", methods=["OPTIONS"])
+def options_update_delete_appartamenti(apt_id):
+    return make_response('', 200)
 
-@app.route("/api/v1/admin/occupazioni/<int:apartment_id>", methods=["GET", "POST"])
+# === APPARTAMENTI: UPDATE/DELETE (Rotta Semplice con Auth) ===
+@app.route("/api/v1/admin/appartamenti/<int:apt_id>", methods=["PUT", "DELETE"])
 @require_auth
-def manage_occupations(apartment_id):
-    """CRUD: Ottiene o crea occupazioni per un appartamento specifico."""
-    # ... (Logica omessa, invariata) ...
-    return jsonify({"message": "Endpoint non implementato."}), 501
+def update_delete_appartamenti(apt_id):
+    
+    if request.method == "PUT":
+        data = request.get_json()
+        new_name = data.get('nome')
+        new_guests = data.get('max_ospiti')
+        
+        if not new_name or not new_guests:
+            return jsonify({"error": "Dati mancanti per l'aggiornamento (Nome o Ospiti)"}), 400
+        
+        try:
+            # La chiamata è corretta per la funzione DB aggiornata
+            rows = db_manager.update_appartamento(apt_id, new_name, new_guests) 
+            if rows == 0:
+                 return jsonify({"error": "Appartamento non trovato o non modificato."}), 404
+            return jsonify({"message": "Appartamento aggiornato"}), 200
+        except psycopg2.errors.UniqueViolation:
+             return jsonify({"error": "Nome appartamento già esistente."}), 409
+        except Exception as e:
+             app.logger.error(f"Errore aggiornamento appartamento: {e}")
+             return jsonify({"error": "Errore DB: Impossibile aggiornare l'appartamento."}), 500
+        
+    elif request.method == "DELETE":
+        try:
+            rows = db_manager.delete_appartamento(apt_id)
+            if rows == 0:
+                 return jsonify({"error": "Appartamento non trovato o non eliminato."}), 404
+            return jsonify({"message": "Appartamento eliminato (disattivato)"}), 204
+        except Exception as e:
+             return jsonify({"error": "Errore DB: Impossibile eliminare l'appartamento."}), 500
 
+# ... (Logica Occupazioni e Ollama Omessa) ...
 
 if __name__ == "__main__":
-    # Inizializza il DB Manager (lo spostiamo alla fine per permettere al logger di avviarsi)
-    try:
-        db_manager = DBManager()
-    except Exception as e:
-        app.logger.error(f"FATAL: Impossibile connettersi o inizializzare il database: {e}")
-        db_manager = None 
-        
     app.run(host='0.0.0.0', port=80)
