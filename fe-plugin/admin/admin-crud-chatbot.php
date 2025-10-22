@@ -1,13 +1,15 @@
 <div class="wrap">
-    <h1>Paguro ChatBot - Configurazione Frasi e Parole Chiave</h1>
-    <p>Qui puoi gestire le frasi di presentazione e le parole chiave che attivano la logica di prenotazione automatica, differenziandole dai fallback di Ollama.</p>
+    <h1>Paguro ChatBot - Configurazione Chatbot</h1>
+    <p>Definisci le frasi di cortesia e le parole chiave che attivano la logica di prenotazione automatica.</p>
     
-    <h2>Frasi di Cortesia e Presentazione</h2>
+    <?php settings_errors(); ?>
+
+    <?php $config = get_option( 'paguro_chatbot_config', array() ); ?>
+
     <form method="post" action="options.php">
-        <?php settings_fields( 'paguro_chatbot_group' ); // Da registrare in register_settings() di Paguro_Admin ?>
+        <?php settings_fields( 'paguro_chatbot_group' ); ?>
         
-        <?php $config = get_option( 'paguro_chatbot_config', array() ); ?>
-        
+        <h2>Frasi di Cortesia e Presentazione</h2>
         <table class="form-table">
             <tr valign="top">
                 <th scope="row">Messaggio di Benvenuto</th>
@@ -19,28 +21,18 @@
                 </td>
             </tr>
         </table>
-        
-        <?php submit_button( 'Salva Frasi' ); ?>
-    </form>
 
-    <hr>
-    <h2>Parole Chiave per la Verifica Disponibilità</h2>
-    <p>Inserisci le parole o frasi che attivano il controllo delle date (es. 'libero', 'date', 'disponibilità').</p>
-    
-    <form method="post" action="options.php">
-        <?php // settings_fields( 'paguro_keywords_group' ); ?>
-        <?php // do_settings_sections( 'paguro-chatbot-config' ); ?>
-        
-        <p><em>Implementazione: Si consiglia di utilizzare un Custom Post Type o una tabella DB per una gestione CRUD pulita. Qui solo l'interfaccia placeholder.</em></p>
-        
-        <table class="wp-list-table widefat fixed striped">
-            <thead>
-                <tr><th>Parola Chiave</th><th>Azione</th></tr>
-            </thead>
-            <tbody>
-                <tr><td>disponibilità, libero, date</td><td>Attiva la logica di verifica API</td></tr>
-                </tbody>
+        <h2>Parole Chiave di Prenotazione</h2>
+        <table class="form-table">
+            <tr valign="top">
+                <th scope="row">Lista Parole Chiave</th>
+                <td>
+                    <input type="text" name="paguro_chatbot_config[keywords]" value="<?php echo esc_attr( $config['keywords'] ?? 'disponibilità, libero, date' ); ?>" class="large-text" style="width: 100%;" />
+                    <p class="description">Elenco di parole chiave separate da virgole (es. <code>libero, date, prenotare</code>) che attivano la logica di verifica disponibilità.</p>
+                </td>
+            </tr>
         </table>
         
+        <?php submit_button( 'Salva Configurazioni Chatbot' ); ?>
     </form>
 </div>

@@ -1,4 +1,3 @@
-version: '3.8'
 services:
   
   # Servizio 1: API Core (Logica di Prenotazione)

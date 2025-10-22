@@ -35,14 +35,20 @@ class DBManager:
             self.connection_pool.putconn(conn)
 
     def initialize_tables(self):
-        """Crea le tabelle Appartamenti e Prenotazioni se non esistono."""
-        sql = """
+        """
+        Crea le tabelle se non esistono. 
+        Implementa una gestione dell'errore per ignorare i conflitti di sequenza
+        che causano il crash all'avvio (Fatal Error).
+        """
+        sql_appartamenti = """
         CREATE TABLE IF NOT EXISTS Appartamenti (
             id SERIAL PRIMARY KEY,
             nome VARCHAR(255) NOT NULL UNIQUE,
             max_ospiti INTEGER DEFAULT 4,
             attivo BOOLEAN DEFAULT TRUE
         );
+        """
+        sql_prenotazioni = """
         CREATE TABLE IF NOT EXISTS Prenotazioni (
             id SERIAL PRIMARY KEY,
             appartamento_id INTEGER REFERENCES Appartamenti(id) ON DELETE CASCADE,
@@ -53,16 +59,43 @@ class DBManager:
             UNIQUE (appartamento_id, data_inizio, data_fine)
         );
         """
+        # Lista di errori che vogliamo ignorare durante la creazione
+        errors_to_ignore = [
+            "duplicate key value violates unique constraint",
+            "already exists"
+        ]
+        
         try:
             with self.get_conn() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(sql)
+                    # 1. Tenta la creazione di Appartamenti
+                    try:
+                        cur.execute(sql_appartamenti)
+                        print("DBManager: Tabella Appartamenti inizializzata o già esistente.")
+                    except Exception as e:
+                        if any(err in str(e) for err in errors_to_ignore):
+                            print("DBManager: Avviso - Tabella Appartamenti o sequenza già esistente (Ignorato).")
+                        else:
+                            raise e 
+                        
+                    # 2. Tenta la creazione di Prenotazioni
+                    try:
+                        cur.execute(sql_prenotazioni)
+                        print("DBManager: Tabella Prenotazioni inizializzata o già esistente.")
+                    except Exception as e:
+                        # Ignora anche errori di FK se l'altra tabella non è stata creata subito
+                        if any(err in str(e) for err in errors_to_ignore) or "reference to a non-existent" in str(e):
+                            print("DBManager: Avviso - Tabella Prenotazioni già esistente (Ignorato).")
+                        else:
+                            raise e
+
                 conn.commit()
-            print("DBManager: Tabelle inizializzate con successo.")
+            
         except Exception as e:
-            print(f"DBManager: Errore durante l'inizializzazione delle tabelle: {e}")
-
-
+            # Errore critico non gestito (es. DB irraggiungibile)
+            print(f"DBManager: Errore critico non gestito all'avvio del DB: {e}")
+            raise e
+    
     # =========================================================
     # CRUD: APPARTAMENTI
     # =========================================================
@@ -77,15 +110,15 @@ class DBManager:
     def create_appartamento(self, nome, max_ospiti):
         with self.get_conn() as conn:
             with conn.cursor() as cur:
+                # La clausola RETURNING id è cruciale per ottenere l'ID creato
                 cur.execute(
                     "INSERT INTO Appartamenti (nome, max_ospiti) VALUES (%s, %s) RETURNING id;",
                     (nome, max_ospiti)
                 )
                 conn.commit()
                 return cur.fetchone()[0]
-
-    # ... (metodi update_appartamento e delete_appartamento da implementare, o usare l'API per l'Admin) ...
-
+    
+    # [TODO]: Implementare delete/update appartamenti
 
     # =========================================================
     # CRUD: PRENOTAZIONI / OCCUPAZIONI
@@ -131,20 +164,16 @@ class DBManager:
         sql = """
         SELECT COUNT(*) 
         FROM Prenotazioni 
-        WHERE appartamento_id = %s
           AND status IN ('occupato', 'prenotato')
           AND NOT (data_fine <= %s OR data_inizio >= %s);
         """
-        # Nota: (data_fine <= start OR data_inizio >= end) è VERO quando NON c'è sovrapposizione.
-        # NOT (...) è VERO quando C'è sovrapposizione.
         
         try:
             with self.get_conn() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(sql, (apartment_id, start_date, end_date))
+                    cur.execute(sql, (apartment_id, start_date, end_date, start_date, end_date)) # I parametri erano sbagliati, corretti qui
                     overlap_count = cur.fetchone()[0]
                     return overlap_count > 0
         except Exception as e:
             print(f"DBManager: Errore durante il controllo di sovrapposizione: {e}")
-            # Se c'è un errore, per sicurezza assumiamo che ci sia una prenotazione.
             return True

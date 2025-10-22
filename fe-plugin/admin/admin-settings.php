@@ -1,5 +1,12 @@
 <div class="wrap">
-    <h1>Paguro ChatBot - Impostazioni API e Connessione</h1>
+    <h1>PaguroChatBot - Impostazioni API e Connessione</h1>
+    
+    <?php 
+    // NECESSARIO per mostrare gli avvisi "Impostazioni salvate."
+    settings_errors(); 
+    ?>
+    
+    <h2>Configurazione API e Display Globale</h2>
     <form method="post" action="options.php">
         <?php
         settings_fields( 'paguro_settings_group' );

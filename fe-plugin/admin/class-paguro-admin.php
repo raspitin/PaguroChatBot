@@ -49,24 +49,21 @@ if ( ! class_exists( 'Paguro_Admin' ) ) {
         }
 
         public function register_settings() {
-            // Registra le impostazioni per la pagina generale
+            // Registra le impostazioni per la pagina generale (API/Display)
             register_setting( 'paguro_settings_group', 'paguro_settings', array( 'sanitize_callback' => array( $this, 'sanitize_paguro_settings' ) ) );
+            
+            // Registra le impostazioni per la pagina Chatbot
+            register_setting( 'paguro_chatbot_group', 'paguro_chatbot_config', array( 'sanitize_callback' => array( $this, 'sanitize_chatbot_settings' ) ) );
 
+            // Sezione Configurazione API
             add_settings_section(
                 'paguro_api_section', 
                 'Configurazione Backend API', 
                 array( $this, 'api_section_callback' ), 
                 'paguro-main'
             );
-            
-            // NUOVA SEZIONE: Controllo Visualizzazione
-            add_settings_section(
-                'paguro_display_section', 
-                'Controllo Visualizzazione Chatbot', 
-                array( $this, 'display_section_callback' ), 
-                'paguro-main'
-            );
 
+            // Campo URL Backend
             add_settings_field(
                 'backend_url', 
                 'URL API (Backend)', 
@@ -75,6 +72,7 @@ if ( ! class_exists( 'Paguro_Admin' ) ) {
                 'paguro_api_section'
             );
 
+            // Campo Token API
             add_settings_field(
                 'api_token', 
                 'Token API Segreto', 
@@ -83,7 +81,15 @@ if ( ! class_exists( 'Paguro_Admin' ) ) {
                 'paguro_api_section'
             );
 
-            // NUOVO CAMPO: Interruttore Globale
+            // Sezione Controllo Visualizzazione
+            add_settings_section(
+                'paguro_display_section', 
+                'Controllo Visualizzazione Chatbot', 
+                array( $this, 'display_section_callback' ), 
+                'paguro-main'
+            );
+            
+            // Campo Interruttore Globale
             add_settings_field(
                 'global_display_enabled', 
                 'Mostra Chatbot su tutte le pagine', 
@@ -135,6 +141,17 @@ if ( ! class_exists( 'Paguro_Admin' ) ) {
                 $output['global_display_enabled'] = 1;
             } else {
                 $output['global_display_enabled'] = 0; 
+            }
+            return $output;
+        }
+
+        public function sanitize_chatbot_settings($input) {
+            $output = [];
+            if (isset($input['welcome_message'])) {
+                $output['welcome_message'] = sanitize_textarea_field($input['welcome_message']);
+            }
+            if (isset($input['keywords'])) {
+                $output['keywords'] = sanitize_text_field($input['keywords']);
             }
             return $output;
         }
