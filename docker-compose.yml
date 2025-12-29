@@ -1,0 +1,35 @@
+services:
+  # Servizio IA (Ollama)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: paguro_ollama
+    volumes:
+      - ./ollama_data:/root/.ollama  # Salva i modelli in locale per non riscaricarli
+    ports:
+      - "11434:11434"
+    restart: always
+    networks:
+      - paguro_net
+
+  # Servizio Logica (FastAPI + Python)
+  paguro_api:
+    build: .
+    container_name: paguro_brain
+    ports:
+      - "8001:8000"  # Cloudflare punterà qui (tramite Tunnel o Port Forwarding)
+    environment:
+      - OLLAMA_HOST=http://paguro_ollama:11434
+      # Configurazione InfluxDB (adatta i valori ai tuoi attuali)
+      - INFLUX_URL=http://192.168.1.140:8086
+      - INFLUX_TOKEN=FK8kbg-h2lyooQsunsmNb0Jv7bG7rUG4VtaTahfJCrv5vZwbqvkU5lDrmDjtvi9eGq7PHMrnJLJm_qnOqf6Y-A==
+      - INFLUX_ORG=PaguroChatBot
+      - INFLUX_BUCKET=paguro_analytics
+    depends_on:
+      - ollama
+    restart: always
+    networks:
+      - paguro_net
+
+networks:
+  paguro_net:
+    driver: bridge
