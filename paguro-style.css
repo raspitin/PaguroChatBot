@@ -1,0 +1,184 @@
+/* 1. BOTTONE (Bolla) CENTRATO */
+#paguro-bubble {
+    position: fixed;
+    bottom: 20px;
+    left: 50% !important;   /* Forza il posizionamento a sinistra */
+    right: auto !important; /* Annulla il vecchio posizionamento a destra */
+    transform: translateX(-50%) !important; /* Centra perfettamente */
+    width: 60px;
+    height: 60px;
+    background-color: #0073aa; 
+    border-radius: 50%;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    cursor: pointer;
+    z-index: 99999; 
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: white;
+    font-size: 30px;
+    transition: transform 0.2s;
+}
+
+#paguro-bubble:hover {
+    transform: translateX(-50%) scale(1.1) !important; 
+}
+
+/* 2. FINESTRA CHAT CENTRATA */
+#paguro-chat-window {
+    display: none; 
+    position: fixed;
+    bottom: 90px;
+    left: 50% !important;   
+    right: auto !important;
+    transform: translateX(-50%) !important;
+    width: 350px;
+    height: 500px; 
+    max-width: 90vw; 
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 5px 25px rgba(0,0,0,0.25);
+    z-index: 99999;
+    flex-direction: column;
+    overflow: hidden; 
+    font-family: sans-serif;
+}
+
+/* Quando la chat è aperta, applichiamo display flex via JS/CSS */
+#paguro-chat-window.open {
+    display: flex;
+}
+
+/* HEADER */
+.paguro-header {
+    background: #0073aa;
+    color: white;
+    padding: 15px;
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    flex-shrink: 0; /* Non si rimpicciolisce mai */
+}
+
+/* AREA MESSAGGI (QUella che scrolla) */
+#paguro-messages {
+    flex-grow: 1; /* Occupa tutto lo spazio disponibile */
+    overflow-y: auto; /* Abilita lo scroll verticale */
+    padding: 15px;
+    background: #f0f2f5;
+    scroll-behavior: smooth;
+}
+
+/* Stilizzazione Scrollbar (Chrome/Safari/Edge) */
+#paguro-messages::-webkit-scrollbar {
+    width: 6px;
+}
+#paguro-messages::-webkit-scrollbar-track {
+    background: #f1f1f1; 
+}
+#paguro-messages::-webkit-scrollbar-thumb {
+    background: #ccc; 
+    border-radius: 3px;
+}
+#paguro-messages::-webkit-scrollbar-thumb:hover {
+    background: #aaa; 
+}
+
+/* MESSAGGI */
+.paguro-msg {
+    margin-bottom: 12px;
+    padding: 10px 14px;
+    border-radius: 18px;
+    max-width: 85%;
+    font-size: 14px;
+    line-height: 1.5;
+    word-wrap: break-word;
+    position: relative;
+    animation: fadeIn 0.3s ease;
+}
+
+.paguro-msg.bot {
+    background: #ffffff;
+    color: #333;
+    align-self: flex-start;
+    border-bottom-left-radius: 4px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    margin-right: auto; /* Spinge a sinistra */
+}
+
+.paguro-msg.user {
+    background: #0073aa;
+    color: white;
+    align-self: flex-end;
+    margin-left: auto; /* Spinge a destra */
+    border-bottom-right-radius: 4px;
+}
+
+/* Link o bottoni dentro i messaggi */
+.paguro-book-btn {
+    display: inline-block;
+    margin-top: 5px;
+    background: #e5f6fd;
+    color: #0073aa;
+    text-decoration: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: bold;
+    border: 1px solid #0073aa;
+    transition: all 0.2s;
+}
+.paguro-book-btn:hover {
+    background: #0073aa;
+    color: white;
+}
+
+/* INPUT AREA */
+.paguro-input-area {
+    padding: 12px;
+    border-top: 1px solid #ddd;
+    background: #fff;
+    display: flex;
+    flex-shrink: 0; /* Non si rimpicciolisce mai */
+}
+
+#paguro-input {
+    flex: 1;
+    border: 1px solid #ddd;
+    padding: 10px 15px;
+    border-radius: 20px;
+    outline: none;
+    font-size: 14px;
+}
+
+#paguro-input:focus {
+    border-color: #0073aa;
+}
+
+#paguro-send {
+    background: transparent;
+    border: none;
+    color: #0073aa;
+    font-weight: bold;
+    cursor: pointer;
+    margin-left: 10px;
+    font-size: 14px;
+    text-transform: uppercase;
+    padding: 0 10px;
+}
+
+/* Animazione semplice */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* MOBILE RESPONSIVE */
+@media (max-width: 400px) {
+    #paguro-chat-window {
+        width: 95%;
+        bottom: 85px;
+        height: 60vh; /* Altezza variabile su mobile */
+    }
+}
