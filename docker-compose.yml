@@ -3,6 +3,8 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: paguro_ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=-1
     volumes:
       - ./ollama_data:/root/.ollama  # Salva i modelli in locale per non riscaricarli
     ports:
@@ -17,6 +19,8 @@ services:
     container_name: paguro_brain
     ports:
       - "8001:8000"  # Cloudflare punterà qui (tramite Tunnel o Port Forwarding)
+    volumes:
+      - ./app:/app
     environment:
       - OLLAMA_HOST=http://paguro_ollama:11434
       # Configurazione InfluxDB (adatta i valori ai tuoi attuali)
