@@ -1,6 +1,7 @@
 jQuery(document).ready(function($) {
     
-
+    // ICONA PAGURO (Immagine PNG)
+    const paguroIcon = `<img src="${paguroData.icon_url}" alt="Assistente Paguro" class="paguro-icon-img" />`;
 
     // 1. INIEZIONE HTML
     $('body').append(`
@@ -25,34 +26,25 @@ jQuery(document).ready(function($) {
         localStorage.setItem('paguro_session_id', sessionId);
     }
 
-    // Carica lo storico al refresh della pagina
     loadChatHistory();
 
-    // Funzione: Salva messaggio nel LocalStorage
     function saveMessageToHistory(role, htmlContent) {
         let history = JSON.parse(localStorage.getItem('paguro_history_' + sessionId) || '[]');
         history.push({ role: role, content: htmlContent });
-        // Teniamo solo gli ultimi 50 messaggi per non intasare la memoria
         if (history.length > 50) history.shift();
         localStorage.setItem('paguro_history_' + sessionId, JSON.stringify(history));
     }
 
-    // Funzione: Carica messaggi salvati
     function loadChatHistory() {
         let history = JSON.parse(localStorage.getItem('paguro_history_' + sessionId) || '[]');
-        
         if (history.length === 0) {
-            // Messaggio di benvenuto default se non c'è storico
             appendMessage('bot', 'Ciao! Sono l\'Assistente Paguro 🐚<br>Cerchi disponibilità o informazioni?', false);
         } else {
-            history.forEach(msg => {
-                appendMessage(msg.role, msg.content, false); // false = non risalvare
-            });
+            history.forEach(msg => appendMessage(msg.role, msg.content, false));
         }
         scrollToBottom();
     }
 
-    // Funzione helper per aggiungere messaggi a schermo
     function appendMessage(role, html, save = true) {
         const className = role === 'user' ? 'user' : 'bot';
         $('#paguro-messages').append(`<div class="paguro-msg ${className}">${html}</div>`);
@@ -78,57 +70,43 @@ jQuery(document).ready(function($) {
         var msg = $('#paguro-input').val().trim();
         if(msg === '') return;
 
-        // 1. Mostra e salva messaggio utente
         appendMessage('user', msg, true);
         $('#paguro-input').val('');
         scrollToBottom();
 
-        // 2. Chiamata AJAX
         doAjaxRequest({
             message: msg,
             session_id: sessionId
         });
     }
 
-    // PAGINAZIONE ("...altre date")
+    // CLICK "ALTRE DATE"
     $(document).on('click', '.paguro-load-more', function(e) {
         e.preventDefault();
         var btn = $(this);
-        var offset = btn.data('offset');
-        var aptId = btn.data('apt');
-        var month = btn.data('month');
-
         btn.text('Caricamento...').css('color', '#999').css('pointer-events', 'none');
 
         doAjaxRequest({
             message: 'LOAD_MORE', 
             session_id: sessionId,
-            offset: offset,
-            apt_id: aptId,
-            filter_month: month
+            offset: btn.data('offset'),
+            apt_id: btn.data('apt'),
+            filter_month: btn.data('month')
         }, true);
     });
 
-    // PRENOTAZIONE (Ninja Forms link)
+    // CLICK "PRENOTA"
     $(document).on('click', '.paguro-book-btn', function(e) {
         e.preventDefault();
-        var aptValue = $(this).data('apt');
-        var dateIn   = $(this).data('in'); 
-        var dateOut  = $(this).data('out');
-        
         var targetUrl = paguroData.booking_url + 
-                        '?nf_apt=' + encodeURIComponent(aptValue) + 
-                        '&nf_in=' + encodeURIComponent(dateIn) + 
-                        '&nf_out=' + encodeURIComponent(dateOut);
-        
+                        '?nf_apt=' + encodeURIComponent($(this).data('apt')) + 
+                        '&nf_in=' + encodeURIComponent($(this).data('in')) + 
+                        '&nf_out=' + encodeURIComponent($(this).data('out'));
         window.open(targetUrl, '_blank');
     });
 
-    // LOGICA AJAX CENTRALE
     function doAjaxRequest(dataParams, isSystemRequest = false) {
         var loadingId = 'loading-' + Date.now();
-        
-        // Mostra loader solo se è l'utente a scrivere (non salviamo il loader nella history)
         if(!isSystemRequest) {
             $('#paguro-messages').append('<div class="paguro-msg bot" id="' + loadingId + '">...</div>');
             scrollToBottom();
@@ -145,15 +123,8 @@ jQuery(document).ready(function($) {
                 $('#' + loadingId).remove();
                 if(res.success) {
                     let reply = res.data.reply;
-                    
-                    if(res.data.type === 'ACTION' && !reply) {
-                        reply = "⚙️ Sto verificando..."; 
-                    }
-                    
-                    if(reply) {
-                        // Mostra e SALVA la risposta del bot
-                        appendMessage('bot', reply, true);
-                    }
+                    if(res.data.type === 'ACTION' && !reply) reply = "⚙️ Sto verificando..."; 
+                    if(reply) appendMessage('bot', reply, true);
                 } else {
                     appendMessage('bot', 'Errore di connessione.', false);
                 }
@@ -167,18 +138,10 @@ jQuery(document).ready(function($) {
     }
 
     $('#paguro-send').click(sendMessage);
-    $('#paguro-input').keypress(function(e) {
-        if(e.which == 13) sendMessage();
-    });
+    $('#paguro-input').keypress(function(e) { if(e.which == 13) sendMessage(); });
+    function scrollToBottom() { var div = $('#paguro-messages'); div.scrollTop(div.prop("scrollHeight")); }
 
-    function scrollToBottom() {
-        var div = $('#paguro-messages');
-        div.scrollTop(div.prop("scrollHeight"));
-    }
-
-    // ---------------------------------------------------------
-    // AUTO-COMPILAZIONE FORM (Invariato)
-    // ---------------------------------------------------------
+    // AUTO-COMPILAZIONE FORM
     function tryPopulateForm() {
         const params = new URLSearchParams(window.location.search);
         const pApt = params.get('nf_apt');
@@ -187,14 +150,9 @@ jQuery(document).ready(function($) {
 
         if(pApt) {
             let aptSelect = $('.nf-custom-apt').find('select');
-            if(aptSelect.length && aptSelect.val() !== pApt) {
-                aptSelect.val(pApt).trigger('change');
-            }
+            if(aptSelect.length && aptSelect.val() !== pApt) aptSelect.val(pApt).trigger('change');
             let summaryApt = $('.nf-summary-apt');
-            if(summaryApt.length) {
-                let formattedApt = pApt.charAt(0).toUpperCase() + pApt.slice(1);
-                summaryApt.text(formattedApt).css('color', '#000');
-            }
+            if(summaryApt.length) summaryApt.text(pApt.charAt(0).toUpperCase() + pApt.slice(1)).css('color', '#000');
         }
         if(pIn) {
             let dateInInput = $('.nf-custom-in').find('input.nf-element');
@@ -219,10 +177,6 @@ jQuery(document).ready(function($) {
     $(document).on('nfFormReady', function() {
         tryPopulateForm();
         let attempts = 0;
-        let interval = setInterval(function() {
-            tryPopulateForm();
-            attempts++;
-            if(attempts > 6) clearInterval(interval);
-        }, 500);
+        let interval = setInterval(function() { tryPopulateForm(); attempts++; if(attempts > 6) clearInterval(interval); }, 500);
     });
 });
