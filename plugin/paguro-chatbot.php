@@ -1,15 +1,15 @@
 <?php
 /**
  * Plugin Name: Paguro ChatBot
- * Description: Assistente virtuale con gestione prezzi stagionali e dati ospiti.
- * Version: 1.1.1
+ * Description: Assistente virtuale con gestione prezzi stagionali, disponibilità e integrazione Ninja Forms.
+ * Version: 1.3.0
  * Author: Tuo Nome
  */
 
 if (!defined('ABSPATH')) exit;
 
 define('PAGURO_API_URL', 'https://api.viamerano24.it/chat'); 
-define('PAGURO_VERSION', '1.1.1');
+define('PAGURO_VERSION', '1.3.0');
 
 // 1. CREAZIONE TABELLE (DATABASE)
 register_activation_hook(__FILE__, 'paguro_create_tables');
@@ -17,7 +17,6 @@ function paguro_create_tables() {
     global $wpdb;
     $charset_collate = $wpdb->get_charset_collate();
 
-    // Tabella 1: Appartamenti
     $sql1 = "CREATE TABLE IF NOT EXISTS {$wpdb->prefix}paguro_apartments (
         id mediumint(9) NOT NULL AUTO_INCREMENT,
         name varchar(100) NOT NULL,
@@ -25,7 +24,6 @@ function paguro_create_tables() {
         PRIMARY KEY  (id)
     ) $charset_collate;";
 
-    // Tabella 2: Disponibilità/Prenotazioni (Aggiornata con dati ospite)
     $sql2 = "CREATE TABLE IF NOT EXISTS {$wpdb->prefix}paguro_availability (
         id mediumint(9) NOT NULL AUTO_INCREMENT,
         apartment_id mediumint(9) NOT NULL,
@@ -41,7 +39,6 @@ function paguro_create_tables() {
         KEY apartment_id (apartment_id)
     ) $charset_collate;";
 
-    // Tabella 3: Listino Prezzi Stagionali (NUOVA)
     $sql3 = "CREATE TABLE IF NOT EXISTS {$wpdb->prefix}paguro_prices (
         id mediumint(9) NOT NULL AUTO_INCREMENT,
         apartment_id mediumint(9) NOT NULL,
@@ -60,30 +57,29 @@ function paguro_create_tables() {
 
 // 2. CARICAMENTO SCRIPT FRONTEND
 add_action('wp_enqueue_scripts', 'paguro_enqueue_scripts');
+
+
 function paguro_enqueue_scripts() {
     wp_enqueue_style('paguro-css', plugin_dir_url(__FILE__) . 'paguro-style.css', [], PAGURO_VERSION);
     wp_enqueue_script('paguro-js', plugin_dir_url(__FILE__) . 'paguro-front.js', ['jquery'], PAGURO_VERSION, true);
     
     wp_localize_script('paguro-js', 'paguroData', [
-        'ajax_url' => admin_url('admin-ajax.php'),
-        'nonce'    => wp_create_nonce('paguro_chat_nonce')
+        'ajax_url'    => admin_url('admin-ajax.php'),
+        'nonce'       => wp_create_nonce('paguro_chat_nonce'),
+        // Assicurati che questa riga del booking_url sia corretta per il tuo sito
+        'booking_url' => site_url('/prenota'), 
+        
+        // --- AGGIUNGI QUESTA RIGA QUI SOTTO ---
+        // Questo genera l'URL corretto per l'immagine che hai caricato nella cartella del plugin
+        'icon_url'    => plugin_dir_url(__FILE__) . 'paguro_bot_icon.png' 
     ]);
 }
 
 // 3. MENU ADMIN
 add_action('admin_menu', 'paguro_admin_menu');
 function paguro_admin_menu() {
-    add_menu_page(
-        'Gestione Paguro',
-        'Paguro Booking',
-        'manage_options',
-        'paguro-booking',
-        'paguro_render_admin',
-        'dashicons-building',
-        50
-    );
+    add_menu_page('Gestione Paguro', 'Paguro Booking', 'manage_options', 'paguro-booking', 'paguro_render_admin', 'dashicons-building', 50);
 }
-
 function paguro_render_admin() {
     require_once plugin_dir_path(__FILE__) . 'admin-page.php';
 }
@@ -98,87 +94,160 @@ function paguro_handle_chat() {
     
     $message = sanitize_text_field($_POST['message']);
     $session_id = sanitize_text_field($_POST['session_id']);
+    
+    // Parametri per paginazione
+    $offset = isset($_POST['offset']) ? intval($_POST['offset']) : 0;
+    $req_apt_id = isset($_POST['apt_id']) ? intval($_POST['apt_id']) : 0;
+    $req_month = isset($_POST['filter_month']) ? sanitize_text_field($_POST['filter_month']) : '';
 
-    // Chiamata al Server Python (Geekom)
-    $response = wp_remote_post(PAGURO_API_URL, [
-        'body' => json_encode(['message' => $message, 'session_id' => $session_id]),
-        'headers' => ['Content-Type' => 'application/json'],
-        'timeout' => 60
-    ]);
+    $data = [];
 
-    if (is_wp_error($response)) {
-        wp_send_json_error(['reply' => 'Il Paguro è momentaneamente irraggiungibile.']);
+    // SE è una richiesta di "Carica altri", saltiamo la chiamata IA e andiamo dritti al DB
+    if ($offset > 0) {
+        $data = ['type' => 'ACTION', 'action' => 'CHECK_AVAILABILITY', 'reply' => ''];
+    } else {
+        // Chiamata standard al Server Python (IA)
+        $response = wp_remote_post(PAGURO_API_URL, [
+            'body' => json_encode(['message' => $message, 'session_id' => $session_id]),
+            'headers' => ['Content-Type' => 'application/json'],
+            'timeout' => 60
+        ]);
+
+        if (is_wp_error($response)) {
+            wp_send_json_error(['reply' => 'Il Paguro è momentaneamente irraggiungibile.']);
+            return;
+        }
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
     }
 
-    $body = wp_remote_retrieve_body($response);
-    $data = json_decode($body, true);
-
-    // --- LOGICA DISPONIBILITÀ E PREZZI ---
+// --- LOGICA DISPONIBILITÀ ---
     if (isset($data['type']) && $data['type'] === 'ACTION' && $data['action'] === 'CHECK_AVAILABILITY') {
         
-        // CONFIGURAZIONE STAGIONE 2026
+        // 1. Riconoscimento Mese
+        $target_month = $req_month; 
+        if (empty($target_month)) {
+            $months_map = ['giugno' => '06', 'luglio' => '07', 'agosto' => '08', 'settembre' => '09'];
+            foreach ($months_map as $m_name => $m_code) {
+                if (stripos($message, $m_name) !== false) {
+                    $target_month = $m_code;
+                    break;
+                }
+            }
+        }
+
+        // --- MODIFICA 2 SETTIMANE: Rileviamo l'intento ---
+        $weeks_to_check = 1;
+        $duration_label = "una settimana";
+        
+        // Cerchiamo vari modi di dire "2 settimane"
+        if (preg_match('/due sett|2 sett|14 giorn|15 giorn|coppia di sett/i', $message)) {
+            $weeks_to_check = 2;
+            $duration_label = "due settimane consecutive";
+        }
+        // --------------------------------------------------
+
+        // Configurazione Stagione
         $season_start = new DateTime('2026-06-13');
         $season_end   = new DateTime('2026-10-03');
         
         $apartments = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}paguro_apartments");
-        $prices     = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}paguro_prices");
-
-        $html = "Ecco le disponibilità per l'estate 2026:<br><br>";
-        $found_any = false;
+        
+        // Intestazione dinamica
+        $intro = $target_month ? " per il mese richiesto" : " per l'estate 2026";
+        $html = ($offset > 0) ? "" : "Ecco le disponibilità ($duration_label){$intro}:<br><br>";
+        
+        $found_any_global = false;
 
         foreach ($apartments as $apt) {
-            $html .= "🏠 <b>{$apt->name}</b>:<br>";
-            
+            if ($req_apt_id > 0 && $apt->id != $req_apt_id) continue;
+
+            if ($offset == 0) {
+                $html .= "🏠 <b>{$apt->name}</b>:<br>";
+            }
+
             $interval = DateInterval::createFromDateString('1 week');
             $period   = new DatePeriod($season_start, $interval, $season_end);
             
             $slots_found = 0;
-            
+            $slots_shown = 0;
+            $limit = 4;
+
             foreach ($period as $dt) {
-                $check_date = $dt->format('Y-m-d');
-                $end_date_obj = clone $dt;
-                $end_date_obj->modify('+7 days');
-                $end_date_fmt = $end_date_obj->format('d/m');
+                // Filtro Mese (Controlla se la data di INIZIO cade nel mese richiesto)
+                if ($target_month && $dt->format('m') !== $target_month) {
+                    continue; 
+                }
+
+                // --- MODIFICA 2 SETTIMANE: Calcolo date ---
+                $check_date_start = $dt->format('Y-m-d');
                 
-                // 1. CHECK OCCUPATO (La settimana cade dentro un periodo bloccato?)
+                // Calcoliamo la fine in base a quante settimane ha chiesto l'utente
+                $end_date_obj = clone $dt;
+                $end_date_obj->modify('+' . ($weeks_to_check * 7) . ' days');
+                $check_date_end = $end_date_obj->format('Y-m-d');
+                
+                // Controlliamo se supera la fine della stagione
+                if ($end_date_obj > $season_end) continue; 
+                // ------------------------------------------
+
+                // Check Database: L'appartamento deve essere libero per TUTTO il periodo
+                // La query controlla se c'è ALMENO UN giorno occupato in mezzo
                 $is_occupied = $wpdb->get_var($wpdb->prepare(
                     "SELECT COUNT(*) FROM {$wpdb->prefix}paguro_availability 
                      WHERE apartment_id = %d 
-                     AND (date_start <= %s AND date_end > %s)", 
-                    $apt->id, $check_date, $check_date
+                     AND (date_start < %s AND date_end > %s)", // Logica di sovrapposizione temporale
+                    $apt->id, $check_date_end, $check_date_start
                 ));
 
                 if ($is_occupied == 0) {
-                    // 2. CALCOLO PREZZO (Logica Base vs Stagionale)
-                    $current_price = $apt->base_price; 
-                    
-                    foreach($prices as $p) {
-                        // Se la data di inizio settimana rientra in un periodo speciale
-                        if($p->apartment_id == $apt->id && $check_date >= $p->date_start && $check_date < $p->date_end) {
-                            $current_price = $p->weekly_price;
-                            break; // Trovato prezzo speciale, stop
-                        }
-                    }
-
-                    $start_fmt = $dt->format('d/m');
-                    // Genera link prenotazione (per ora placeholder)
-                    $html .= "- {$start_fmt} - {$end_date_fmt}: <b>€" . number_format($current_price, 0) . "</b> <a href='#' class='paguro-book-btn' data-apt='{$apt->id}' data-date='{$check_date}'>[Prenota]</a><br>";
                     $slots_found++;
-                    $found_any = true;
+
+                    if ($slots_found <= $offset) continue;
+
+                    if ($slots_shown < $limit) {
+                        $start_show = $dt->format('d/m');
+                        $end_show = $end_date_obj->format('d/m'); // Data finale dinamica
+
+                        $apt_val_form = strtolower($apt->name); 
+                        $date_in_form = $dt->format('d/m/Y');
+                        $date_out_form = $end_date_obj->format('d/m/Y');
+
+                        $html .= "- {$start_show} - {$end_show} <a href='#' class='paguro-book-btn' 
+                                    data-apt='{$apt_val_form}' 
+                                    data-in='{$date_in_form}' 
+                                    data-out='{$date_out_form}'>[Prenota]</a><br>";
+                        
+                        $slots_shown++;
+                        $found_any_global = true;
+                    } else {
+                        $new_offset = $offset + $limit;
+                        $html .= "<a href='#' class='paguro-load-more' data-apt='{$apt->id}' data-offset='{$new_offset}' data-month='{$target_month}' style='color:#0073aa; font-weight:bold; cursor:pointer;'>...e altre date successive</a><br>";
+                        break; 
+                    }
                 }
-                
-                // Limitiamo output visivo
-                if($slots_found >= 4) { $html .= "...e date successive.<br>"; break; }
             }
-            $html .= "<br>";
+            if ($offset == 0) $html .= "<br>";
         }
 
-        if (!$found_any) {
-            $data['reply'] = "Mi dispiace, per la stagione 2026 è tutto completo!";
+        if (!$found_any_global && $offset == 0) {
+            // Messaggio specifico se cercava 2 settimane e non ce ne sono
+            if ($weeks_to_check > 1) {
+                $data['reply'] = "Non ho trovato disponibilità per 2 settimane consecutive" . ($target_month ? " nel mese richiesto." : ".");
+            } elseif ($target_month) {
+                $data['reply'] = "Mi dispiace, non ho trovato date libere per il mese richiesto.";
+            } else {
+                $data['reply'] = "Mi dispiace, per la stagione 2026 è tutto completo!";
+            }
         } else {
-            $data['reply'] = $html;
+            if ($offset > 0 && !$found_any_global) {
+                $data['reply'] = "Non ci sono altre date disponibili.";
+            } else {
+                $data['reply'] = $html;
+            }
         }
     }
 
     wp_send_json_success($data);
 }
+?>
