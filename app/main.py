@@ -1,33 +1,31 @@
+import os
+from datetime import datetime
 from fastapi import FastAPI, Request, BackgroundTasks
 from pydantic import BaseModel
-import logging
-import os
-import ollama
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
-from datetime import datetime
+from ollama import AsyncClient
 
 app = FastAPI()
 
-# --- CONFIGURAZIONE ---
+# --- CONFIGURAZIONE (Da variabili d'ambiente) ---
 INFLUX_URL = os.getenv("INFLUX_URL", "http://192.168.1.140:8086")
-INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "my-token")
-INFLUX_ORG = os.getenv("INFLUX_ORG", "my-org")
+INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "token-default")
+INFLUX_ORG = os.getenv("INFLUX_ORG", "PaguroChatBot")
 INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "paguro_analytics")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://ollama:11434")
+MODEL_NAME = os.getenv("MODEL_NAME", "llama3.2:1b") # Default al modello migliore
 
-# Usa un modello leggero per velocità
-MODEL_NAME = "tinyllama" 
-
-# Client InfluxDB
-client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
-write_api = client.write_api(write_options=SYNCHRONOUS)
+# Setup Clients
+influx_client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+write_api = influx_client.write_api(write_options=SYNCHRONOUS)
+ollama_client = AsyncClient(host=OLLAMA_HOST) # Client Asincrono
 
 class ChatRequest(BaseModel):
     message: str
     session_id: str
 
-# --- LOGGING ASINCRONO ---
+# --- LOGGING BACKGROUND ---
 def log_to_influx(request_data: dict, headers: dict):
     try:
         country = headers.get("cf-ipcountry", "Unknown")
@@ -48,50 +46,71 @@ def log_to_influx(request_data: dict, headers: dict):
 # --- ENDPOINT CHAT ---
 @app.post("/chat")
 async def chat_endpoint(chat_req: ChatRequest, request: Request, background_tasks: BackgroundTasks):
-    user_msg = chat_req.message.lower()
+    user_msg = chat_req.message.lower().strip()
     
-    # 1. Logging
+    # 1. Logging non bloccante
     headers = dict(request.headers)
     background_tasks.add_task(log_to_influx, chat_req.dict(), headers)
 
-    # 2. FAST PATH (Risposte immediate < 0.2s)
+    # 2. FAST PATH (Risposte immediate)
     
     # Saluti
     saluti = ["ciao", "buongiorno", "buonasera", "salve", "hola", "ehi"]
-    if any(x in user_msg for x in saluti):
+    if any(x == user_msg for x in saluti) or (any(x in user_msg for x in saluti) and len(user_msg.split()) < 3):
         return {
             "type": "TEXT",
-            "reply": "Ciao! Benvenuto a Villa Celi. Cerchi disponibilità o informazioni?"
+            "reply": "Ciao! Sono Paguro, il tuo assistente virtuale per Villa Celi. Cerchi disponibilità o informazioni?"
         }
 
-    # Info generiche
-    if "dove" in user_msg and ("siete" in user_msg or "trova" in user_msg):
+    # Foto / Media
+    keywords_foto = ["foto", "vedere", "immagini", "interno", "esterni", "camere"]
+    if any(k in user_msg for k in keywords_foto):
+        link_foto_corallo = "https://www.villaceli.it/appartamento-corallo/" 
+        link_foto_tartaruga = "https://www.villaceli.it/appartamento-tartaruga/" 
         return {
             "type": "TEXT",
-            "reply": "Siamo in una zona bellissima! Trovi la mappa e le indicazioni esatte sul nostro sito."
+            "reply": f"Certamente! Guarda qui: <br>• <a href='{link_foto_corallo}' target='_blank'>Appartamento Corallo</a><br>• <a href='{link_foto_tartaruga}' target='_blank'>Appartamento Tartaruga</a>"
+        }
+
+    # Posizione
+    keywords_pos = ["dove", "raggiungere", "arrivare", "mappa", "posizione", "strada"]
+    if any(k in user_msg for k in keywords_pos) or ("dove" in user_msg and "siete" in user_msg):
+        link_sito = "https://www.villaceli.it/dove-siamo/"
+        return {
+            "type": "TEXT",
+            "reply": f"Siamo a Palinuro, immersi nel verde! 🌿<br>Trovi indicazioni e mappa <a href='{link_sito}' target='_blank'>sul nostro sito</a>."
         }
 
     # Azioni (Prenotazione)
-    keywords_prenotazione = ["prenot", "disponib", "prezzo", "costo", "luglio", "agosto", "settimana", "liber"]
+    keywords_prenotazione = ["prenot", "disponib", "prezzo", "costo", "luglio", "agosto", "settimana", "liber", "date"]
     if any(k in user_msg for k in keywords_prenotazione):
         return {
             "type": "ACTION",
             "action": "CHECK_AVAILABILITY",
-            "reply": "Verifico subito le settimane libere..."
+            "reply": "Controllo subito il calendario..."
         }
 
-    # 3. SLOW PATH (IA TinyLlama)
+    # 3. SLOW PATH (IA Asincrona)
     try:
-        system_prompt = "Sei Paguro. Rispondi in italiano in max 15 parole. Sii simpatico."
+        system_prompt = (
+            "Sei Paguro, assistente di Villa Celi. "
+            "Rileva la lingua e rispondi sempre nella lingua dell'utente. "
+            "Se l'utente chiede cose strane o non legate alle vacanze, "
+            "rispondi simpaticamente riportando il discorso sulle vacanze. "
+            "Sii breve (max 30 parole)."
+        )
         
-        response = ollama.chat(model=MODEL_NAME, messages=[
+        response = await ollama_client.chat(model=MODEL_NAME, messages=[
             {'role': 'system', 'content': system_prompt},
             {'role': 'user', 'content': chat_req.message},
-        ], options={'num_predict': 30, 'num_ctx': 512})
+        ], options={
+            'num_predict': 50,
+            'temperature': 0.2
+        })
 
         bot_reply = response['message']['content']
         return {"type": "TEXT", "reply": bot_reply}
 
     except Exception as e:
         print(f"Errore Ollama: {e}")
-        return {"type": "TEXT", "reply": "Scusa, stavo schiacciando un pisolino. Puoi ripetere?"}
+        return {"type": "TEXT", "reply": "Scusa, ho avuto un attimo di esitazione. Puoi ripetere?"}
