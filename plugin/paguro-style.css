@@ -1,174 +1,153 @@
-/* 1. BOTTONE (Bolla) POSIZIONATO A DESTRA */
-#paguro-bubble {
-    position: fixed !important;
-    bottom: 110px !important;   
-    right: 25px !important;     
-    left: auto !important;      
-    top: auto !important;       
-    transform: none !important; 
-    
-    width: 65px;
-    height: 65px;
-    background-color: #ffffff; /* Bianco per risaltare l'icona PNG */
+/* STILE BOT PAGURO */
+.paguro-chat-launcher {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 60px;
+    height: 60px;
+    background: #ffffff;
     border-radius: 50%;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     cursor: pointer;
-    z-index: 2147483647; /* Sopra a tutto */
+    z-index: 999999; /* Altissimo per stare sopra a tutto */
     display: flex;
-    justify-content: center;
     align-items: center;
-    transition: transform 0.2s;
-    padding: 5px; 
+    justify-content: center;
+    transition: transform 0.3s ease;
 }
 
-/* STILE PER LA TUA IMMAGINE PNG */
-.paguro-icon-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    border-radius: 50%;
+.paguro-chat-launcher:hover {
+    transform: scale(1.1);
 }
 
-#paguro-bubble:hover {
-    transform: scale(1.05) !important; 
-    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+.paguro-chat-launcher img {
+    width: 40px;
+    height: auto;
 }
 
-/* 2. FINESTRA CHAT */
-#paguro-chat-window {
-    display: none; 
-    position: fixed !important;
-    bottom: 185px !important;  
-    right: 25px !important;    
-    left: auto !important;
-    transform: none !important;
-    
+/* WIDGET CHAT (Finestra) */
+.paguro-chat-widget {
+    position: fixed;
+    bottom: 90px;
+    right: 20px;
     width: 350px;
-    height: 500px; 
-    max-width: 90vw; 
+    max-width: 90%;
+    height: 500px;
+    max-height: 80vh;
     background: #fff;
     border-radius: 12px;
-    box-shadow: 0 5px 30px rgba(0,0,0,0.3);
-    z-index: 2147483647; 
+    box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+    z-index: 999999;
+    display: flex;
     flex-direction: column;
-    overflow: hidden; 
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-}
-
-#paguro-chat-window.open {
-    display: flex !important;
+    overflow: hidden;
+    font-family: sans-serif;
+    display: none; /* Nascosto di default, gestito da JS */
 }
 
 /* HEADER */
-.paguro-header {
-    background: #0073aa; 
-    color: white;
+.paguro-chat-header {
+    background: #0073aa;
+    color: #fff;
     padding: 15px;
-    font-weight: 600;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    flex-shrink: 0; 
+    font-weight: bold;
 }
 
-/* AREA MESSAGGI */
-#paguro-messages {
-    flex-grow: 1; 
-    overflow-y: auto; 
+/* BODY */
+.paguro-chat-body {
+    flex: 1;
     padding: 15px;
-    background: #f0f2f5;
-    scroll-behavior: smooth;
+    overflow-y: auto;
+    background: #f9f9f9;
 }
 
 /* MESSAGGI */
 .paguro-msg {
-    margin-bottom: 12px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.paguro-msg-content {
     padding: 10px 14px;
-    border-radius: 18px;
-    max-width: 85%;
+    border-radius: 12px;
     font-size: 14px;
-    line-height: 1.5;
+    line-height: 1.4;
+    max-width: 80%;
     word-wrap: break-word;
-    position: relative;
 }
 
-.paguro-msg.bot {
-    background: #ffffff;
-    color: #333;
-    align-self: flex-start;
-    border-bottom-left-radius: 4px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-    margin-right: auto;
+.paguro-msg-user {
+    flex-direction: row-reverse;
 }
-
-.paguro-msg.user {
+.paguro-msg-user .paguro-msg-content {
     background: #0073aa;
-    color: white;
-    align-self: flex-end;
-    margin-left: auto;
-    border-bottom-right-radius: 4px;
+    color: #fff;
+    border-bottom-right-radius: 2px;
 }
 
-/* LINK PRENOTAZIONE */
+.paguro-msg-bot .paguro-msg-content {
+    background: #e5e5ea;
+    color: #000;
+    border-bottom-left-radius: 2px;
+}
+
+.paguro-bot-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+}
+
+/* FOOTER INPUT */
+.paguro-chat-footer {
+    padding: 10px;
+    border-top: 1px solid #eee;
+    background: #fff;
+    display: flex;
+    gap: 10px;
+}
+
+.paguro-chat-footer input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 20px;
+    outline: none;
+}
+
+.paguro-chat-footer button {
+    background: #0073aa;
+    color: #fff;
+    border: none;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+/* LINK PRENOTA */
 .paguro-book-btn {
     display: inline-block;
     margin-top: 5px;
-    background: #e5f6fd;
-    color: #0073aa;
-    text-decoration: none;
     padding: 4px 8px;
+    background: #28a745;
+    color: white !important;
+    text-decoration: none;
     border-radius: 4px;
+    font-size: 12px;
     font-weight: bold;
-    border: 1px solid #0073aa;
-    transition: all 0.2s;
 }
 .paguro-book-btn:hover {
-    background: #0073aa;
-    color: white;
+    background: #218838;
 }
 
-.paguro-load-more {
-    display: inline-block;
-    margin-top: 5px;
-    font-size: 0.9em;
+/* Loading dots */
+.paguro-typing {
+    animation: blink 1s infinite;
 }
-
-/* INPUT AREA */
-.paguro-input-area {
-    padding: 12px;
-    border-top: 1px solid #ddd;
-    background: #fff;
-    display: flex;
-    flex-shrink: 0;
-}
-
-#paguro-input {
-    flex: 1;
-    border: 1px solid #ddd;
-    padding: 10px 15px;
-    border-radius: 20px;
-    outline: none;
-    font-size: 14px;
-}
-#paguro-input:focus { border-color: #0073aa; }
-
-#paguro-send {
-    background: transparent;
-    border: none;
-    color: #0073aa;
-    font-weight: bold;
-    cursor: pointer;
-    margin-left: 10px;
-    font-size: 14px;
-    text-transform: uppercase;
-    padding: 0 10px;
-}
-
-@media (max-width: 400px) {
-    #paguro-chat-window {
-        width: 95%;
-        right: 2.5% !important;
-        bottom: 150px !important;
-        height: 60vh;
-    }
-}
+@keyframes blink { 50% { opacity: 0.5; } }

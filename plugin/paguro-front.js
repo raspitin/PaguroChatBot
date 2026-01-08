@@ -1,182 +1,220 @@
 jQuery(document).ready(function($) {
     
-    // ICONA PAGURO (Immagine PNG)
-    const paguroIcon = `<img src="${paguroData.icon_url}" alt="Assistente Paguro" class="paguro-icon-img" />`;
-
-    // 1. INIEZIONE HTML
-    $('body').append(`
-        <div id="paguro-bubble">${paguroIcon}</div>
-        <div id="paguro-chat-window">
-            <div class="paguro-header">
-                <span>Assistente Paguro</span>
-                <span id="paguro-close" style="cursor:pointer;">&times;</span>
-            </div>
-            <div id="paguro-messages"></div>
-            <div class="paguro-input-area">
-                <input type="text" id="paguro-input" placeholder="Scrivi qui..." />
-                <button id="paguro-send">Invia</button>
-            </div>
-        </div>
-    `);
-
-    // GESTIONE SESSIONE E STORICO
-    let sessionId = localStorage.getItem('paguro_session_id');
-    if (!sessionId) {
-        sessionId = 'sess_' + Math.random().toString(36).substr(2, 9);
-        localStorage.setItem('paguro_session_id', sessionId);
-    }
-
-    loadChatHistory();
-
-    function saveMessageToHistory(role, htmlContent) {
-        let history = JSON.parse(localStorage.getItem('paguro_history_' + sessionId) || '[]');
-        history.push({ role: role, content: htmlContent });
-        if (history.length > 50) history.shift();
-        localStorage.setItem('paguro_history_' + sessionId, JSON.stringify(history));
-    }
-
-    function loadChatHistory() {
-        let history = JSON.parse(localStorage.getItem('paguro_history_' + sessionId) || '[]');
-        if (history.length === 0) {
-            appendMessage('bot', 'Ciao! Sono l\'Assistente Paguro 🐚<br>Cerchi disponibilità o informazioni?', false);
-        } else {
-            history.forEach(msg => appendMessage(msg.role, msg.content, false));
-        }
-        scrollToBottom();
-    }
-
-    function appendMessage(role, html, save = true) {
-        const className = role === 'user' ? 'user' : 'bot';
-        $('#paguro-messages').append(`<div class="paguro-msg ${className}">${html}</div>`);
-        if (save) saveMessageToHistory(role, html);
-    }
-
-    // TOGGLE CHAT
-    $('#paguro-bubble, #paguro-close').click(function() {
-        var chatWindow = $('#paguro-chat-window');
-        chatWindow.fadeToggle(200, function() {
-            if($(this).is(':visible')) {
-                $(this).addClass('open').css('display', 'flex'); 
-                scrollToBottom();
-                $('#paguro-input').focus();
-            } else {
-                $(this).removeClass('open');
-            }
-        });
+    // 1. GESTIONE CHATBOT (Apertura/Chiusura)
+    $('.paguro-chat-launcher').on('click', function() {
+        $('.paguro-chat-widget').fadeToggle();
     });
 
-    // INVIO MESSAGGIO
+    $('.paguro-chat-header .close-btn').on('click', function() {
+        $('.paguro-chat-widget').fadeOut();
+    });
+
+    // 2. INVIO MESSAGGI
+    $('#paguro-send-btn').on('click', function() {
+        sendMessage();
+    });
+
+    $('#paguro-input').on('keypress', function(e) {
+        if(e.which == 13) sendMessage();
+    });
+
     function sendMessage() {
         var msg = $('#paguro-input').val().trim();
-        if(msg === '') return;
+        if(msg === "") return;
 
-        appendMessage('user', msg, true);
+        // Aggiungi messaggio utente
+        appendMessage("user", msg);
         $('#paguro-input').val('');
-        scrollToBottom();
+        $('#paguro-chat-body').scrollTop($('#paguro-chat-body')[0].scrollHeight);
 
-        doAjaxRequest({
-            message: msg,
-            session_id: sessionId
+        // Loading...
+        var loadingId = appendMessage("bot", '<span class="paguro-typing">...</span>');
+
+        // Genera Session ID se non c'è
+        if (!localStorage.getItem('paguro_session_id')) {
+            localStorage.setItem('paguro_session_id', 'sess_' + Math.random().toString(36).substr(2, 9));
+        }
+
+        // Chiamata AJAX
+        $.ajax({
+            url: paguroData.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'paguro_chat_request',
+                nonce: paguroData.nonce,
+                message: msg,
+                session_id: localStorage.getItem('paguro_session_id')
+            },
+            success: function(response) {
+                removeMessage(loadingId);
+                if(response.success) {
+                    var data = response.data;
+                    
+                    if(data.type === 'ACTION' && data.action === 'CHECK_AVAILABILITY') {
+                        appendMessage("bot", data.reply);
+                        // Gestione pulsanti "Load More"
+                        $('.paguro-load-more').off('click').on('click', function(e) {
+                            e.preventDefault();
+                            loadMoreDates($(this));
+                        });
+                    } else {
+                        appendMessage("bot", data.reply);
+                    }
+                } else {
+                    appendMessage("bot", "Errore di connessione. Riprova.");
+                }
+            },
+            error: function() {
+                removeMessage(loadingId);
+                appendMessage("bot", "Errore tecnico. Contatta l'amministratore.");
+            }
         });
     }
 
-    // CLICK "ALTRE DATE"
-    $(document).on('click', '.paguro-load-more', function(e) {
-        e.preventDefault();
-        var btn = $(this);
-        btn.text('Caricamento...').css('color', '#999').css('pointer-events', 'none');
+    // 3. CARICAMENTO ALTRE DATE (Paginazione)
+    function loadMoreDates(btn) {
+        var aptId = btn.data('apt');
+        var offset = btn.data('offset');
+        var month = btn.data('month');
 
-        doAjaxRequest({
-            message: 'LOAD_MORE', 
-            session_id: sessionId,
-            offset: btn.data('offset'),
-            apt_id: btn.data('apt'),
-            filter_month: btn.data('month')
-        }, true);
-    });
-
-    // CLICK "PRENOTA"
-    $(document).on('click', '.paguro-book-btn', function(e) {
-        e.preventDefault();
-        var targetUrl = paguroData.booking_url + 
-                        '?nf_apt=' + encodeURIComponent($(this).data('apt')) + 
-                        '&nf_in=' + encodeURIComponent($(this).data('in')) + 
-                        '&nf_out=' + encodeURIComponent($(this).data('out'));
-        window.open(targetUrl, '_blank');
-    });
-
-    function doAjaxRequest(dataParams, isSystemRequest = false) {
-        var loadingId = 'loading-' + Date.now();
-        if(!isSystemRequest) {
-            $('#paguro-messages').append('<div class="paguro-msg bot" id="' + loadingId + '">...</div>');
-            scrollToBottom();
-        }
+        btn.text('Caricamento...').css('opacity', '0.5');
 
         $.ajax({
             url: paguroData.ajax_url,
             type: 'POST',
-            data: Object.assign({
+            data: {
                 action: 'paguro_chat_request',
-                nonce: paguroData.nonce
-            }, dataParams),
-            success: function(res) {
-                $('#' + loadingId).remove();
-                if(res.success) {
-                    let reply = res.data.reply;
-                    if(res.data.type === 'ACTION' && !reply) reply = "⚙️ Sto verificando..."; 
-                    if(reply) appendMessage('bot', reply, true);
-                } else {
-                    appendMessage('bot', 'Errore di connessione.', false);
-                }
-                scrollToBottom();
+                nonce: paguroData.nonce,
+                message: "LOAD_MORE", 
+                session_id: localStorage.getItem('paguro_session_id'),
+                offset: offset,
+                apt_id: aptId,
+                filter_month: month
             },
-            error: function() {
-                $('#' + loadingId).remove();
-                appendMessage('bot', 'Errore server.', false);
+            success: function(response) {
+                btn.hide(); 
+                if(response.success) {
+                    appendMessage("bot", response.data.reply);
+                     $('.paguro-load-more').off('click').on('click', function(e) {
+                        e.preventDefault();
+                        loadMoreDates($(this));
+                    });
+                }
             }
         });
     }
 
-    $('#paguro-send').click(sendMessage);
-    $('#paguro-input').keypress(function(e) { if(e.which == 13) sendMessage(); });
-    function scrollToBottom() { var div = $('#paguro-messages'); div.scrollTop(div.prop("scrollHeight")); }
+    function appendMessage(sender, text) {
+        var id = 'msg_' + Math.random().toString(36).substr(2, 9);
+        var cls = sender === "user" ? "paguro-msg-user" : "paguro-msg-bot";
+        
+        // Se è il bot, aggiungiamo l'icona
+        var iconHtml = '';
+        if (sender === 'bot' && paguroData.icon_url) {
+            iconHtml = '<img src="' + paguroData.icon_url + '" class="paguro-bot-avatar">';
+        }
 
-    // AUTO-COMPILAZIONE FORM
-    function tryPopulateForm() {
-        const params = new URLSearchParams(window.location.search);
-        const pApt = params.get('nf_apt');
-        const pIn  = params.get('nf_in');
-        const pOut = params.get('nf_out');
-
-        if(pApt) {
-            let aptSelect = $('.nf-custom-apt').find('select');
-            if(aptSelect.length && aptSelect.val() !== pApt) aptSelect.val(pApt).trigger('change');
-            let summaryApt = $('.nf-summary-apt');
-            if(summaryApt.length) summaryApt.text(pApt.charAt(0).toUpperCase() + pApt.slice(1)).css('color', '#000');
-        }
-        if(pIn) {
-            let dateInInput = $('.nf-custom-in').find('input.nf-element');
-            if(dateInInput.length && dateInInput.val() !== pIn) {
-                dateInInput.val(pIn).trigger('change');
-                if (dateInInput[0]._flatpickr) dateInInput[0]._flatpickr.setDate(pIn, true);
-            }
-            let summaryIn = $('.nf-summary-in');
-            if(summaryIn.length) summaryIn.text(pIn).css('color', '#000');
-        }
-        if(pOut) {
-            let dateOutInput = $('.nf-custom-out').find('input.nf-element');
-            if(dateOutInput.length && dateOutInput.val() !== pOut) {
-                dateOutInput.val(pOut).trigger('change');
-                if (dateOutInput[0]._flatpickr) dateOutInput[0]._flatpickr.setDate(pOut, true);
-            }
-            let summaryOut = $('.nf-summary-out');
-            if(summaryOut.length) summaryOut.text(pOut).css('color', '#000');
-        }
+        var html = '<div id="' + id + '" class="paguro-msg ' + cls + '">' + iconHtml + '<div class="paguro-msg-content">' + text + '</div></div>';
+        $('#paguro-chat-body').append(html);
+        $('#paguro-chat-body').scrollTop($('#paguro-chat-body')[0].scrollHeight);
+        return id;
     }
 
-    $(document).on('nfFormReady', function() {
-        tryPopulateForm();
-        let attempts = 0;
-        let interval = setInterval(function() { tryPopulateForm(); attempts++; if(attempts > 6) clearInterval(interval); }, 500);
+    function removeMessage(id) {
+        $('#' + id).remove();
+    }
+
+    // 4. CLICK "PRENOTA" (Logica Lock + Redirect)
+    $(document).on('click', '.paguro-book-btn', function(e) {
+        e.preventDefault();
+        var btn = $(this);
+        var originalText = btn.text();
+        
+        if(btn.hasClass('locking')) return;
+        btn.addClass('locking').text('Blocco date...');
+
+        var aptValue = btn.data('apt');
+        var dateIn   = btn.data('in'); 
+        var dateOut  = btn.data('out');
+
+        $.ajax({
+            url: paguroData.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'paguro_lock_dates',
+                nonce: paguroData.nonce,
+                apt_name: aptValue,
+                date_in: dateIn,
+                date_out: dateOut
+            },
+            success: function(res) {
+                btn.removeClass('locking').text(originalText);
+                
+                if(res.success) {
+                    var token = res.data.token;
+                    var queueMsg = res.data.queue_msg; 
+                    
+                    var targetUrl = paguroData.booking_url + 
+                        '?nf_apt=' + encodeURIComponent(aptValue) + 
+                        '&nf_in=' + encodeURIComponent(dateIn) + 
+                        '&nf_out=' + encodeURIComponent(dateOut) +
+                        '&nf_token=' + encodeURIComponent(token) +
+                        '&nf_msg=' + encodeURIComponent(queueMsg); 
+                    
+                    window.open(targetUrl, '_self'); 
+                    
+                } else {
+                    alert("⚠️ " + res.data.msg);
+                }
+            },
+            error: function() {
+                btn.removeClass('locking').text(originalText);
+                alert("Errore di comunicazione col server.");
+            }
+        });
     });
+
+    // 5. AUTO-COMPILAZIONE NINJA FORMS (Il Fix Cruciale)
+    // Ascoltiamo l'evento speciale di Ninja Forms che dice "Il form è pronto"
+    $(document).on('nfFormReady', function() {
+        const params = new URLSearchParams(window.location.search);
+        
+        // A. Gestione Avviso Coda
+        const pMsg = params.get('nf_msg');
+        if(pMsg) {
+             let warningBox = $('.nf-queue-warning');
+             if(warningBox.length === 0) {
+                 // Inietta un box se non esiste
+                 $('.nf-form-content').prepend('<div class="paguro-warning-box" style="background:#fff3cd; color:#856404; padding:15px; border:1px solid #ffeeba; border-radius:5px; margin-bottom:15px;"></div>');
+                 warningBox = $('.paguro-warning-box');
+             }
+             warningBox.html('<strong>' + decodeURIComponent(pMsg) + '</strong>');
+        }
+
+        // B. FIX DEL TOKEN (Questo risolve il bug del debug.log)
+        // Cerca l'input che ha preso il valore sbagliato "{querystring:nf_token}"
+        // e lo sostituisce col token vero preso dall'URL.
+        const token = params.get('nf_token');
+        if (token) {
+            // Cerca input hidden che ha il valore "rotto"
+            var brokenInput = $('input[value="{querystring:nf_token}"]');
+            if (brokenInput.length > 0) {
+                brokenInput.val(token); // Corregge il valore!
+                brokenInput.trigger('change'); // Avvisa Ninja Forms del cambio
+            } else {
+                // Fallback: cerca un input nascosto generico se il valore default era vuoto
+                // (Meno preciso ma utile come tentativo)
+                $('input[type="hidden"]').each(function() {
+                    // Se troviamo un input vuoto, proviamo a metterci il token? 
+                    // Meglio di no per sicurezza, ci affidiamo al selettore sopra.
+                });
+            }
+        }
+    });
+
+    // Fallback classico se nfFormReady non scatta (es. form già caricato)
+    setTimeout(function() {
+        $(document).trigger('nfFormReady');
+    }, 1500);
+
 });
