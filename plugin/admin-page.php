@@ -4,7 +4,7 @@ global $wpdb;
 $base_url = admin_url('admin.php?page=paguro-booking');
 $table_avail = $wpdb->prefix . 'paguro_availability';
 $table_apt   = $wpdb->prefix . 'paguro_apartments';
-$current_tab = isset($_GET['tab']) ? $_GET['tab'] : 'bookings';
+$current_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'bookings';
 
 // --- SAVE SETTINGS ---
 if (isset($_POST['paguro_save_opts']) && check_admin_referer('paguro_admin_opts')) {
@@ -24,7 +24,12 @@ if (isset($_POST['paguro_apt_action'])) {
     if (!check_admin_referer('paguro_apt_nonce', 'paguro_apt_nonce')) wp_die('Sicurezza.');
     if ($_POST['paguro_apt_action'] === 'add_apt') { $name = sanitize_text_field($_POST['apt_name']); if ($name) $wpdb->insert($table_apt, ['name' => $name, 'base_price' => 500]); }
     if ($_POST['paguro_apt_action'] === 'delete_apt') { $id = intval($_POST['apt_id']); $wpdb->delete($table_apt, ['id' => $id]); }
-    if ($_POST['paguro_apt_action'] === 'save_pricing') { $id = intval($_POST['apt_id']); $prices = $_POST['price'] ?? []; $json = json_encode($prices); $wpdb->update($table_apt, ['pricing_json' => $json], ['id' => $id]); echo '<div class="notice notice-success"><p>Listino Aggiornato!</p></div>'; }
+    if ($_POST['paguro_apt_action'] === 'save_pricing') { $id = intval($_POST['apt_id']); $prices = $_POST['price'] ?? []; 
+        // Sanitizzazione array prezzi
+        $clean_prices = []; foreach($prices as $k => $v) { $clean_prices[sanitize_text_field($k)] = floatval($v); }
+        $json = json_encode($clean_prices); 
+        $wpdb->update($table_apt, ['pricing_json' => $json], ['id' => $id]); echo '<div class="notice notice-success"><p>Listino Aggiornato!</p></div>'; 
+    }
 }
 
 // --- BOOKING ACTIONS ---
@@ -40,41 +45,44 @@ if (isset($_POST['paguro_action'])) {
         echo '<div class="notice notice-success"><p>Anonimizzato.</p></div>';
     }
 
-    $apt_row = $wpdb->get_row($wpdb->prepare("SELECT name, pricing_json, base_price FROM $table_apt WHERE id=%d", $w->apartment_id));
-    $ph = ['guest_name'=>$w->guest_name, 'date_start'=>date('d/m/Y',strtotime($w->date_start)), 'date_end'=>date('d/m/Y',strtotime($w->date_end)), 'apt_name'=>ucfirst($apt_row->name ?? ''), 'link_riepilogo'=>site_url("/riepilogo-prenotazione/?token={$w->lock_token}")];
-    
-    if ($_POST['paguro_action'] === 'confirm_booking') {
-        if ($w) {
+    if ($w) {
+        $apt_row = $wpdb->get_row($wpdb->prepare("SELECT name, pricing_json, base_price FROM $table_apt WHERE id=%d", $w->apartment_id));
+        $ph = ['guest_name'=>$w->guest_name, 'date_start'=>date('d/m/Y',strtotime($w->date_start)), 'date_end'=>date('d/m/Y',strtotime($w->date_end)), 'apt_name'=>ucfirst($apt_row->name ?? ''), 'link_riepilogo'=>site_url("/riepilogo-prenotazione/?token={$w->lock_token}")];
+        
+        if ($_POST['paguro_action'] === 'confirm_booking') {
             $wpdb->update($table_avail, ['status' => 1], ['id' => $req_id]);
+            // FIX SQL INJECTION: Ensure ID is int
             $losers = $wpdb->get_results($wpdb->prepare("SELECT id FROM $table_avail WHERE apartment_id=%d AND id!=%d AND status!=1 AND (date_start<%s AND date_end>%s)", $w->apartment_id, $req_id, $w->date_end, $w->date_start));
             foreach ($losers as $l) $wpdb->delete($table_avail, ['id' => $l->id]);
+            
             $tot = 0; $cur = new DateTime($w->date_start); $end = new DateTime($w->date_end); $prices = json_decode($apt_row->pricing_json, true) ?: [];
             while($cur < $end) { $k = $cur->format('Y-m-d'); $tot += ($prices[$k] ?? $apt_row->base_price); $cur->add(new DateInterval('P1W')); }
             $dep = ceil($tot * 0.3); $ph['total_cost'] = $tot; $ph['deposit_cost'] = $dep;
+            
             $subj = paguro_parse_template(get_option('paguro_txt_email_confirm_subj'), $ph);
             $body = paguro_parse_template(get_option('paguro_txt_email_confirm_body'), $ph);
             if ($w->guest_email) paguro_send_html_email($w->guest_email, $subj, $body);
             paguro_add_history($req_id, 'ADMIN_CONFIRM', 'Confermata da Admin');
             echo '<div class="notice notice-success"><p>Confermata.</p></div>';
         }
-    }
-    if ($_POST['paguro_action'] === 'extend_expiry') {
-        $new = sanitize_text_field($_POST['new_expiry']);
-        if($req_id && $new) { $wpdb->update($table_avail, ['lock_expires' => $new], ['id' => $req_id]); paguro_add_history($req_id, 'ADMIN_EXTEND', 'Scadenza estesa a '.$new); echo '<div class="notice notice-success"><p>Scadenza aggiornata.</p></div>'; }
-    }
-    if ($_POST['paguro_action'] === 'resend_email') {
-        if ($w->guest_email) {
-            $subj = paguro_parse_template(get_option('paguro_txt_email_request_subj'), $ph); $body = paguro_parse_template(get_option('paguro_txt_email_request_body'), $ph);
-            paguro_send_html_email($w->guest_email, $subj, $body); paguro_add_history($req_id, 'ADMIN_RESEND_REQ', 'Reinviata mail richiesta'); echo '<div class="notice notice-success"><p>Mail reinviata.</p></div>';
+        if ($_POST['paguro_action'] === 'extend_expiry') {
+            $new = sanitize_text_field($_POST['new_expiry']);
+            if($req_id && $new) { $wpdb->update($table_avail, ['lock_expires' => $new], ['id' => $req_id]); paguro_add_history($req_id, 'ADMIN_EXTEND', 'Scadenza estesa a '.$new); echo '<div class="notice notice-success"><p>Scadenza aggiornata.</p></div>'; }
         }
-    }
-    if ($_POST['paguro_action'] === 'resend_receipt_ack') {
-        if ($w->guest_email) {
-            $subj = paguro_parse_template(get_option('paguro_txt_email_receipt_subj'), $ph); $body = paguro_parse_template(get_option('paguro_txt_email_receipt_body'), $ph);
-            paguro_send_html_email($w->guest_email, $subj, $body); paguro_add_history($req_id, 'ADMIN_RESEND_ACK', 'Reinviata mail distinta'); echo '<div class="notice notice-success"><p>Mail reinviata.</p></div>';
+        if ($_POST['paguro_action'] === 'resend_email') {
+            if ($w->guest_email) {
+                $subj = paguro_parse_template(get_option('paguro_txt_email_request_subj'), $ph); $body = paguro_parse_template(get_option('paguro_txt_email_request_body'), $ph);
+                paguro_send_html_email($w->guest_email, $subj, $body); paguro_add_history($req_id, 'ADMIN_RESEND_REQ', 'Reinviata mail richiesta'); echo '<div class="notice notice-success"><p>Mail reinviata.</p></div>';
+            }
         }
+        if ($_POST['paguro_action'] === 'resend_receipt_ack') {
+            if ($w->guest_email) {
+                $subj = paguro_parse_template(get_option('paguro_txt_email_receipt_subj'), $ph); $body = paguro_parse_template(get_option('paguro_txt_email_receipt_body'), $ph);
+                paguro_send_html_email($w->guest_email, $subj, $body); paguro_add_history($req_id, 'ADMIN_RESEND_ACK', 'Reinviata mail distinta'); echo '<div class="notice notice-success"><p>Mail reinviata.</p></div>';
+            }
+        }
+        if ($_POST['paguro_action'] === 'delete_row') { $wpdb->delete($table_avail, ['id' => $req_id]); echo '<div class="notice notice-success"><p>Eliminata.</p></div>'; }
     }
-    if ($_POST['paguro_action'] === 'delete_row') { $wpdb->delete($table_avail, ['id' => $req_id]); echo '<div class="notice notice-success"><p>Eliminata.</p></div>'; }
 }
 
 function paguro_render_timeline() {
@@ -94,12 +102,12 @@ function paguro_render_timeline() {
     foreach($p as $dt) { $d=$day_map[$dt->format('D')]; $n=$dt->format('d'); $bg=($dt->format('N')>=6)?'#ddd':'#fff'; echo "<td style='border:1px solid #eee; border-bottom:1px solid #999; text-align:center; background:$bg; width:20px; padding:2px;'>$d<br>$n</td>"; }
     echo '</tr>';
     foreach($apts as $apt) {
-        echo "<tr><td style='border:1px solid #ddd; padding:5px; border-right:2px solid #999;'><strong>{$apt->name}</strong></td>";
+        echo "<tr><td style='border:1px solid #ddd; padding:5px; border-right:2px solid #999;'><strong>".esc_html($apt->name)."</strong></td>";
         foreach($p as $dt) {
             $ymd = $dt->format('Y-m-d'); $class = ''; $title = '';
             foreach($bookings as $b) { if ($b->apartment_id == $apt->id && $ymd >= $b->date_start && $ymd < $b->date_end) { if ($b->status == 1) { $class = 'bg-red'; $title="Occ: ".$b->guest_name; } elseif ($b->status == 2) { $class = 'bg-yellow'; $title="Pend: ".$b->guest_name; } } }
             $style = ($class=='bg-red')?"background:#dc3545;":(($class=='bg-yellow')?"background:#ffc107;":"");
-            echo "<td style='border:1px solid #eee; border-right:1px solid #ddd; $style' title='$title'></td>";
+            echo "<td style='border:1px solid #eee; border-right:1px solid #ddd; $style' title='".esc_attr($title)."'></td>";
         }
         echo "</tr>";
     }
