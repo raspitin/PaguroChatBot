@@ -6,7 +6,7 @@ services:
     environment:
       - OLLAMA_KEEP_ALIVE=-1
     volumes:
-      - ./ollama_data:/root/.ollama  # Salva i modelli in locale per non riscaricarli
+      - ./ollama_data:/root/.ollama
     ports:
       - "11434:11434"
     restart: always
@@ -18,16 +18,16 @@ services:
     build: .
     container_name: paguro_brain
     ports:
-      - "8001:8000"  # Cloudflare punterà qui (tramite Tunnel o Port Forwarding)
+      - "${API_PORT:-8001}:8000"
     volumes:
       - ./app:/app
     environment:
-      - OLLAMA_HOST=http://paguro_ollama:11434
-      # Configurazione InfluxDB (adatta i valori ai tuoi attuali)
-      - INFLUX_URL=http://192.168.1.140:8086
-      - INFLUX_TOKEN=FK8kbg-h2lyooQsunsmNb0Jv7bG7rUG4VtaTahfJCrv5vZwbqvkU5lDrmDjtvi9eGq7PHMrnJLJm_qnOqf6Y-A==
-      - INFLUX_ORG=PaguroChatBot
-      - INFLUX_BUCKET=paguro_analytics
+      - OLLAMA_HOST=${OLLAMA_HOST}
+      - INFLUX_URL=${INFLUX_URL}
+      - INFLUX_TOKEN=${INFLUX_TOKEN}
+      - INFLUX_ORG=${INFLUX_ORG}
+      - INFLUX_BUCKET=${INFLUX_BUCKET}
+      - MODEL_NAME=${MODEL_NAME}
     depends_on:
       - ollama
     restart: always
