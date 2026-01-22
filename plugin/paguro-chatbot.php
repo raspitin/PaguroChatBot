@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Paguro ChatBot
- * Description: Versione 2.7.0 - GDPR, Advanced Cancellation & UI Fixes
- * Version: 2.7.0
+ * Description: Versione 2.7.2 - Stable Release (Menu Fix, GDPR, Logs, Uploads)
+ * Version: 2.7.2
  * Author: Tuo Nome
  */
 
@@ -10,8 +10,8 @@ if (!defined('ABSPATH')) exit;
 
 // --- CONFIGURAZIONE ---
 define('PAGURO_API_URL', 'https://api.viamerano24.it/chat'); 
-define('PAGURO_VERSION', '2.7.0'); 
-define('PAGURO_PRIVACY_TEXT', '<hr style="border:0; border-top:1px solid #eee; margin:20px 0;"><p style="font-size:11px; color:#888;">🔒 <strong>Privacy & Dati:</strong> Le informazioni raccolte (email, telefono, nome) saranno utilizzate esclusivamente per la gestione del soggiorno richiesto. Hai facoltà di cancellare i tuoi contatti dai nostri sistemi in qualunque momento accedendo alla tua area riservata (per prenotazioni confermate, la cancellazione dei dati sarà possibile 15 giorni dopo la data di check-out).</p>');
+define('PAGURO_VERSION', '2.7.2'); 
+define('PAGURO_PRIVACY_TEXT', '<hr style="border:0; border-top:1px solid #eee; margin:20px 0;"><p style="font-size:11px; color:#888;">🔒 <strong>Privacy & Dati:</strong> Le informazioni raccolte saranno utilizzate esclusivamente per la gestione del soggiorno. Hai facoltà di cancellare i tuoi contatti in qualunque momento dall\'area riservata (per prenotazioni confermate, cancellazione possibile 15 giorni dopo il check-out).</p>');
 
 // 1. SETUP & DB
 register_activation_hook(__FILE__, 'paguro_create_tables');
@@ -32,7 +32,8 @@ function paguro_create_tables() {
         PRIMARY KEY (id), KEY apartment_id (apartment_id)
     ) $charset;";
         
-    require_once(ABSPATH . 'wp-admin/includes/upgrade.php'); dbDelta($sql1); dbDelta($sql2);
+    require_once(ABSPATH . 'wp-admin/includes/upgrade.php'); 
+    dbDelta($sql1); dbDelta($sql2);
     
     if ($wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}paguro_apartments") == 0) {
         $wpdb->insert("{$wpdb->prefix}paguro_apartments", ['name' => 'corallo', 'base_price' => 500]);
@@ -54,15 +55,18 @@ function paguro_set_defaults() {
 
 add_action('plugins_loaded', 'paguro_update_db_structure');
 function paguro_update_db_structure() {
-    if (get_transient('paguro_db_check_270')) return;
+    if (get_transient('paguro_db_check_272')) return;
     global $wpdb; 
     $t1 = $wpdb->prefix . 'paguro_availability'; $cols1 = $wpdb->get_col("DESC $t1", 0);
+    if (!in_array('lock_expires', $cols1)) $wpdb->query("ALTER TABLE $t1 ADD COLUMN lock_expires DATETIME NULL");
+    if (!in_array('receipt_url', $cols1)) $wpdb->query("ALTER TABLE $t1 ADD COLUMN receipt_url VARCHAR(255) NULL");
+    if (!in_array('guest_notes', $cols1)) $wpdb->query("ALTER TABLE $t1 ADD COLUMN guest_notes TEXT NULL");
     if (!in_array('receipt_uploaded_at', $cols1)) $wpdb->query("ALTER TABLE $t1 ADD COLUMN receipt_uploaded_at DATETIME NULL");
     if (!in_array('history_log', $cols1)) $wpdb->query("ALTER TABLE $t1 ADD COLUMN history_log LONGTEXT NULL");
     
     $t2 = $wpdb->prefix . 'paguro_apartments'; $cols2 = $wpdb->get_col("DESC $t2", 0);
     if (!in_array('pricing_json', $cols2)) $wpdb->query("ALTER TABLE $t2 ADD COLUMN pricing_json LONGTEXT NULL");
-    set_transient('paguro_db_check_270', true, DAY_IN_SECONDS);
+    set_transient('paguro_db_check_272', true, DAY_IN_SECONDS);
 }
 
 // 2. HELPER LOGGING & EMAIL
@@ -78,7 +82,6 @@ function paguro_add_history($booking_id, $action, $details = '') {
 }
 
 function paguro_send_html_email($to, $subject, $content) {
-    // Append Privacy Text
     $content .= PAGURO_PRIVACY_TEXT;
     $html = '<!DOCTYPE html><html><body style="font-family:sans-serif;background:#f6f6f6;padding:20px"><div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;"><div style="background:#0073aa;padding:20px;text-align:center;"><h1 style="color:#fff;margin:0;">Villa Celi</h1></div><div style="padding:30px;color:#333;line-height:1.6">'.$content.'</div><div style="background:#eee;padding:15px;text-align:center;font-size:12px;color:#777">&copy; '.date('Y').' Villa Celi</div></div></body></html>';
     $headers = array('Content-Type: text/html; charset=UTF-8', 'From: Villa Celi <info@villaceli.it>');
@@ -94,11 +97,36 @@ function paguro_calculate_quote($apt_id, $date_start, $date_end) {
     return $total;
 }
 
-// 3. ACTIONS HANDLER (LOGIN, CANCEL, ANONYMIZE)
+// 3. ADMIN MENU (FIXED & ROBUST)
+add_action('admin_menu', 'paguro_register_admin_menu');
+function paguro_register_admin_menu() {
+    add_menu_page('Gestione Paguro', 'Paguro Booking', 'manage_options', 'paguro-booking', 'paguro_render_admin_page', 'dashicons-building', 50);
+}
+function paguro_render_admin_page() {
+    $file = plugin_dir_path(__FILE__) . 'admin-page.php';
+    if(file_exists($file)) require_once $file; else echo '<div class="notice notice-error"><p>File admin-page.php mancante.</p></div>';
+}
+
+// 4. ASSETS
+add_action('wp_enqueue_scripts', 'paguro_enqueue_scripts');
+function paguro_enqueue_scripts() {
+    wp_enqueue_script('paguro-js', plugin_dir_url(__FILE__) . 'paguro-front.js', ['jquery'], PAGURO_VERSION, true);
+    $site_key = get_option('paguro_recaptcha_site');
+    if ($site_key) wp_enqueue_script('google-recaptcha', 'https://www.google.com/recaptcha/api.js?render=' . $site_key, [], null, true);
+    wp_localize_script('paguro-js', 'paguroData', [
+        'ajax_url' => admin_url('admin-ajax.php'), 
+        'nonce' => wp_create_nonce('paguro_chat_nonce'),
+        'booking_url' => site_url('/prenotazione/'), 
+        'icon_url' => plugin_dir_url(__FILE__) . 'paguro_bot_icon.png', 
+        'recaptcha_site' => $site_key
+    ]);
+}
+
+// 5. ACTIONS HANDLER (LOGIN, CANCEL, GDPR)
 add_action('init', 'paguro_handle_post_actions');
 function paguro_handle_post_actions() {
     
-    // 1. LOGIN
+    // LOGIN
     if (isset($_POST['paguro_action']) && $_POST['paguro_action'] === 'verify_access') {
         if (!wp_verify_nonce($_POST['paguro_auth_nonce'], 'paguro_auth_action')) wp_die('Security.');
         global $wpdb; $token = sanitize_text_field($_POST['token']); $email = sanitize_email($_POST['verify_email']);
@@ -110,7 +138,7 @@ function paguro_handle_post_actions() {
         } else { wp_redirect(add_query_arg('auth_error', '1')); exit; }
     }
     
-    // 2. CANCELLATION (In-Time & Late)
+    // CANCEL
     if (isset($_POST['paguro_action']) && $_POST['paguro_action'] === 'cancel_user_booking') {
         if (!wp_verify_nonce($_POST['paguro_cancel_nonce'], 'paguro_cancel_action')) wp_die('Security.');
         global $wpdb; $token = sanitize_text_field($_POST['token']);
@@ -121,47 +149,39 @@ function paguro_handle_post_actions() {
         $limit_ts = strtotime($booking->date_start) - (15 * 24 * 3600);
         $in_time = (time() < $limit_ts);
         
-        // Determina tipo cancellazione
         $refund_type = "NONE";
         if ($booking->status == 2) $refund_type = "RITIRO (Nessun pagamento)";
         elseif ($booking->status == 1 && $in_time) $refund_type = "RIMBORSO TOTALE";
         elseif ($booking->status == 1 && !$in_time) $refund_type = "NO RIMBORSO (Fuori tempo)";
 
-        // Esegui Cancellazione
         $wpdb->update("{$wpdb->prefix}paguro_availability", ['status' => 3], ['id' => $booking->id]);
         paguro_add_history($booking->id, 'USER_CANCEL', "Cancellazione Utente. Tipo: $refund_type");
         
-        // Mail Admin
         $adm_msg = "L'utente {$booking->guest_name} ha cancellato la prenotazione #{$booking->id}.\nTipo: $refund_type";
         wp_mail(get_option('admin_email'), "⚠️ Cancellazione - $refund_type", $adm_msg);
         
-        // Mail Utente (Empatica + Info Rimborso)
         $user_subject = "Conferma Cancellazione - Villa Celi";
-        $user_body = "<h2>Ci dispiace che tu non possa venire. 😔</h2><p>Gentile {$booking->guest_name},</p><p>Ti confermiamo che la prenotazione è stata annullata.</p>";
-        
+        $user_body = "<h2>Ci dispiace che tu non possa venire. 😔</h2><p>Gentile {$booking->guest_name},</p><p>Ti confermiamo che la prenotazione è stata <strong>annullata</strong>.</p>";
         if ($refund_type == "RIMBORSO TOTALE") {
-            $user_body .= "<div style='background:#e7f9e7;padding:15px;border:1px solid #28a745;border-radius:5px;'><strong>✅ Rimborso Caparra Avviato</strong><br>Siamo felici di restituirti la caparra. Procederemo al bonifico sull'IBAN di provenienza entro pochi giorni.</div>";
+            $user_body .= "<div style='background:#e7f9e7;padding:15px;border:1px solid #28a745;border-radius:5px;'><strong>✅ Rimborso Caparra Avviato</strong><br>Siamo felici di restituirti la caparra. Procederemo al bonifico sull'IBAN di provenienza.</div>";
         } elseif ($refund_type == "NO RIMBORSO (Fuori tempo)") {
-            $user_body .= "<div style='background:#fff3cd;padding:15px;border:1px solid #ffc107;border-radius:5px;'><strong>⚠️ Caparra Trattenuta</strong><br>Poiché la cancellazione è avvenuta oltre i termini previsti (meno di 15 giorni all'arrivo), come da policy la caparra non potrà essere rimborsata.</div>";
+            $user_body .= "<div style='background:#fff3cd;padding:15px;border:1px solid #ffc107;border-radius:5px;'><strong>⚠️ Caparra Trattenuta</strong><br>Cancellazione avvenuta oltre i termini.</div>";
         } else {
-            $user_body .= "<p>La tua richiesta è stata ritirata dai nostri sistemi.</p>";
+            $user_body .= "<p>Richiesta ritirata.</p>";
         }
         $user_body .= "<p>Speriamo di poterti accogliere in un'altra occasione!</p><p>Un caro saluto,<br><em>Lo Staff</em></p>";
-
         paguro_send_html_email($booking->guest_email, $user_subject, $user_body);
         
         wp_redirect(add_query_arg('cancelled', '1')); exit;
     }
 
-    // 3. GDPR ANONYMIZE
+    // GDPR
     if (isset($_POST['paguro_action']) && $_POST['paguro_action'] === 'anonymize_user_data') {
         if (!wp_verify_nonce($_POST['paguro_anon_nonce'], 'paguro_anon_action')) wp_die('Security.');
         global $wpdb; $token = sanitize_text_field($_POST['token']);
-        
         if (!isset($_COOKIE['paguro_auth_' . $token])) wp_die('Accesso negato.');
         $booking = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$wpdb->prefix}paguro_availability WHERE lock_token=%s", $token));
         
-        // Check date condition (15 days after checkout OR status != 1)
         $can_delete = true;
         if ($booking->status == 1) {
             $checkout_limit = strtotime($booking->date_end) + (15 * 24 * 3600);
@@ -169,25 +189,16 @@ function paguro_handle_post_actions() {
         }
 
         if ($can_delete) {
-            $wpdb->update("{$wpdb->prefix}paguro_availability", [
-                'guest_name' => 'Anonimo (GDPR)',
-                'guest_email' => 'deleted@privacy.user',
-                'guest_phone' => '0000000000',
-                'guest_notes' => ''
-            ], ['id' => $booking->id]);
-            
+            $wpdb->update("{$wpdb->prefix}paguro_availability", ['guest_name' => 'Anonimo (GDPR)', 'guest_email' => 'deleted@privacy.user', 'guest_phone' => '0000000000', 'guest_notes' => ''], ['id' => $booking->id]);
             paguro_add_history($booking->id, 'GDPR_WIPE', 'Dati utente cancellati su richiesta');
             wp_redirect(add_query_arg('anonymized', '1')); exit;
-        } else {
-            wp_die("Impossibile cancellare i dati. Per le prenotazioni attive, attendere 15 giorni dopo la partenza.");
-        }
+        } else wp_die("Impossibile cancellare i dati ora.");
     }
 }
 
-// ... (Functions 6, 7, 8, 9, 10 are identical to v2.6.0 - Include them here) ...
 // 6. CHAT
 add_action('wp_ajax_paguro_chat_request', 'paguro_handle_chat'); add_action('wp_ajax_nopriv_paguro_chat_request', 'paguro_handle_chat');
-function paguro_handle_chat() { /* Copia da v2.6.0 */ 
+function paguro_handle_chat() {
     if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'paguro_chat_nonce')) { wp_send_json_error(['reply' => "⚠️ Sessione scaduta."]); return; }
     global $wpdb;
     try {
@@ -199,7 +210,7 @@ function paguro_handle_chat() { /* Copia da v2.6.0 */
         } else $data = ['type'=>'ACTION', 'action'=>'CHECK_AVAILABILITY'];
         if (($data['type']??'') === 'ACTION') {
             $target_month = $req_month; if(empty($target_month)){ $mm=['giugno'=>'06','luglio'=>'07','agosto'=>'08','settembre'=>'09']; foreach($mm as $k=>$v) if(stripos($msg,$k)!==false) $target_month=$v; }
-            $weeks = preg_match('/due sett|2 sett|14 giorn/i', $msg) ? 2 : 1;
+            $weeks = preg_match('/due sett|2 sett|14 giorn|coppia/i', $msg) ? 2 : 1;
             $s_start = new DateTime('2026-06-13'); $s_end = new DateTime('2026-10-03');
             $raw = $wpdb->get_results($wpdb->prepare("SELECT apartment_id, date_start, date_end, status, lock_expires, created_at FROM {$wpdb->prefix}paguro_availability WHERE (status=1 OR status=2) AND date_end > %s AND date_start < %s", $s_start->format('Y-m-d'), $s_end->format('Y-m-d')));
             $conf = []; $pend = []; $now = current_time('mysql');
@@ -228,8 +239,9 @@ function paguro_handle_chat() { /* Copia da v2.6.0 */
     } catch (Exception $e) { wp_send_json_success(['reply' => "⚠️ Errore tecnico."]); }
 }
 
+// 7. LOCK
 add_action('wp_ajax_paguro_lock_dates', 'paguro_handle_lock'); add_action('wp_ajax_nopriv_paguro_lock_dates', 'paguro_handle_lock');
-function paguro_handle_lock() { /* Copia da v2.6.0 */ 
+function paguro_handle_lock() {
     if (!check_ajax_referer('paguro_chat_nonce', 'nonce', false)) wp_send_json_error(['msg' => "Scaduta."]); global $wpdb;
     try {
         $wpdb->query("DELETE FROM {$wpdb->prefix}paguro_availability WHERE status=2 AND ((lock_expires IS NOT NULL AND lock_expires < NOW()) OR (lock_expires IS NULL AND created_at < DATE_SUB(NOW(), INTERVAL 48 HOUR)))");
@@ -244,8 +256,9 @@ function paguro_handle_lock() { /* Copia da v2.6.0 */
     } catch (Exception $e) { wp_send_json_error(['msg'=>$e->getMessage()]); }
 }
 
+// 8. SUBMIT
 add_action('wp_ajax_paguro_submit_booking', 'paguro_submit_booking'); add_action('wp_ajax_nopriv_paguro_submit_booking', 'paguro_submit_booking');
-function paguro_submit_booking() { /* Copia da v2.6.0 */ 
+function paguro_submit_booking() {
     check_ajax_referer('paguro_chat_nonce', 'nonce'); global $wpdb;
     $recaptcha_secret = get_option('paguro_recaptcha_secret');
     if ($recaptcha_secret && !empty($_POST['recaptcha_token'])) {
@@ -260,18 +273,23 @@ function paguro_submit_booking() { /* Copia da v2.6.0 */
     paguro_add_history($booking->id, 'REQUEST_SENT', "Richiesta inviata da $name ($email)");
     $booking_details = $wpdb->get_row($wpdb->prepare("SELECT b.*, a.name as apt_name FROM {$wpdb->prefix}paguro_availability b JOIN {$wpdb->prefix}paguro_apartments a ON b.apartment_id=a.id WHERE b.id=%d", $booking->id));
     $total_cost = paguro_calculate_quote($booking_details->apartment_id, $booking_details->date_start, $booking_details->date_end);
-    $deposit_cost = ceil($total_cost * 0.30); $link = site_url("/riepilogo-prenotazione/?token={$token}");
+    $deposit_cost = ceil($total_cost * 0.30);
+    $link = site_url("/riepilogo-prenotazione/?token={$token}");
     $ph = ['guest_name' => $name, 'link_riepilogo' => $link, 'apt_name' => ucfirst($booking_details->apt_name), 'date_start' => date('d/m/Y', strtotime($booking_details->date_start)), 'date_end' => date('d/m/Y', strtotime($booking_details->date_end)), 'total_cost' => $total_cost, 'deposit_cost' => $deposit_cost];
-    $subj = paguro_parse_template(get_option('paguro_txt_email_request_subj', 'Richiesta Ricevuta'), $ph);
+    
+    $subj = paguro_parse_template(get_option('paguro_txt_email_request_subj'), $ph);
     $body = paguro_parse_template(get_option('paguro_txt_email_request_body'), $ph);
     paguro_send_html_email($email, $subj, $body);
+    paguro_add_history($booking->id, 'EMAIL_SENT_REQ', "Inviata mail di richiesta");
+    
     $admin_msg = "Nuova Richiesta da $name.\nTotale: €$total_cost\nNote: $notes\nLink: $link";
     wp_mail(get_option('admin_email'), "Nuova Richiesta Paguro", $admin_msg);
     wp_send_json_success(['redirect' => $link]);
 }
 
+// 9. CHECKOUT FORM
 add_shortcode('paguro_checkout', 'paguro_checkout_form');
-function paguro_checkout_form() { /* Copia da v2.6.0 */ 
+function paguro_checkout_form() {
     $token = sanitize_text_field($_GET['token'] ?? ''); $apt = sanitize_text_field($_GET['apt'] ?? ''); $in = sanitize_text_field($_GET['in'] ?? ''); $out = sanitize_text_field($_GET['out'] ?? '');
     global $wpdb; $existing = $wpdb->get_var($wpdb->prepare("SELECT guest_email FROM {$wpdb->prefix}paguro_availability WHERE lock_token = %s", $token));
     if ($existing) { $url = site_url("/riepilogo-prenotazione/?token={$token}"); echo "<script>window.location.replace('$url');</script>"; return; }
@@ -293,8 +311,9 @@ function paguro_checkout_form() { /* Copia da v2.6.0 */
     <?php return ob_get_clean();
 }
 
+// 10. UPLOAD
 add_action('wp_ajax_paguro_upload_receipt', 'paguro_handle_receipt_upload'); add_action('wp_ajax_nopriv_paguro_upload_receipt', 'paguro_handle_receipt_upload');
-function paguro_handle_receipt_upload() { /* Copia da v2.6.0 */ 
+function paguro_handle_receipt_upload() {
     check_ajax_referer('paguro_chat_nonce', 'nonce');
     if (!isset($_FILES['file'])) wp_send_json_error(['msg' => "File mancante."]); global $wpdb; $token = sanitize_text_field($_POST['token']);
     $booking = $wpdb->get_row($wpdb->prepare("SELECT id, guest_name, guest_email, apartment_id, date_start, date_end FROM {$wpdb->prefix}paguro_availability WHERE lock_token = %s", $token));
@@ -302,7 +321,7 @@ function paguro_handle_receipt_upload() { /* Copia da v2.6.0 */
     $file = $_FILES['file']; require_once(ABSPATH . 'wp-admin/includes/file.php'); $uploaded = wp_handle_upload($file, ['test_form' => false]);
     if (isset($uploaded['error'])) wp_send_json_error(['msg' => $uploaded['error']]);
     $wpdb->update("{$wpdb->prefix}paguro_availability", ['receipt_url' => $uploaded['url'], 'receipt_uploaded_at' => current_time('mysql')], ['id' => $booking->id]);
-    paguro_add_history($booking->id, 'RECEIPT_UPLOAD', 'Caricata distinta: ' . basename($uploaded['url']));
+    paguro_add_history($booking->id, 'RECEIPT_UPLOAD', 'Caricata distinta');
     paguro_send_html_email(get_option('admin_email'), "💰 Distinta Caricata - #{$booking->id}", "Ospite: {$booking->guest_name}<br><a href='{$uploaded['url']}'>Vedi File</a>");
     if ($booking->guest_email) {
         $link = site_url('/riepilogo-prenotazione/?token=' . $token);
@@ -316,7 +335,7 @@ function paguro_handle_receipt_upload() { /* Copia da v2.6.0 */
     wp_send_json_success(['url' => $uploaded['url']]);
 }
 
-// 11. SUMMARY (AGGIORNATO)
+// 11. SUMMARY
 add_shortcode('paguro_summary', 'paguro_summary_render');
 function paguro_summary_render() {
     global $wpdb; $token = isset($_GET['token']) ? sanitize_text_field($_GET['token']) : '';
@@ -326,7 +345,6 @@ function paguro_summary_render() {
         <div style="padding:20px; background:#f9f9f9;">
             <?php if (!$token): ?><p>⚠️ Codice mancante.</p><?php else: 
                 if (!isset($_COOKIE['paguro_auth_' . $token])) {
-                    // Auth Form (Stesso di v2.6.0)
                     if (isset($_GET['auth_error'])) echo '<p style="color:red;">❌ Email errata.</p>';
                     echo '<p>🔒 <strong>Area Riservata</strong>. Conferma la tua email.</p><form method="post"><input type="hidden" name="paguro_action" value="verify_access">';
                     wp_nonce_field('paguro_auth_action', 'paguro_auth_nonce');
@@ -335,24 +353,13 @@ function paguro_summary_render() {
                     $b = $wpdb->get_row($wpdb->prepare("SELECT b.*, a.name as apt_name FROM {$wpdb->prefix}paguro_availability b JOIN {$wpdb->prefix}paguro_apartments a ON b.apartment_id = a.id WHERE b.lock_token = %s", $token));
                     if (!$b): ?><p>Non trovata.</p><?php else: 
                         if (isset($_GET['cancelled'])) echo '<div style="background:#f8d7da; color:#721c24; padding:15px; border-radius:5px; margin-bottom:15px;">✅ Cancellazione Confermata.</div>';
-                        if (isset($_GET['anonymized'])) echo '<div style="background:#d4edda; color:#155724; padding:15px; border-radius:5px; margin-bottom:15px;">✅ Dati Cancellati con successo.</div>';
-                        
+                        if (isset($_GET['anonymized'])) echo '<div style="background:#d4edda; color:#155724; padding:15px; border-radius:5px; margin-bottom:15px;">✅ Dati Cancellati.</div>';
                         $exp = $b->lock_expires ? strtotime($b->lock_expires) : (strtotime($b->created_at)+48*3600);
                         $can_up = ($b->status == 2 && time() < $exp);
                         $viewers = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->prefix}paguro_availability WHERE status=2 AND apartment_id=%d AND (date_start<%s AND date_end>%s) AND id!=%d", $b->apartment_id, $b->date_end, $b->date_start, $b->id));
-                        $tot = paguro_calculate_quote($b->apartment_id, $b->date_start, $b->date_end);
-                        $dep = ceil($tot * 0.3);
-                        $is_status_1 = ($b->status == 1);
-                        $is_status_2 = ($b->status == 2 && $b->receipt_url);
-                        $limit_ts = strtotime($b->date_start) - (15 * 24 * 3600);
-                        $in_time_cancel = (time() < $limit_ts);
-                        
-                        // Check GDPR Delete: 15 days AFTER end
-                        $can_anonymize = true;
-                        if ($b->status == 1) {
-                            $gdpr_limit = strtotime($b->date_end) + (15 * 24 * 3600);
-                            if (time() < $gdpr_limit) $can_anonymize = false;
-                        }
+                        $tot = paguro_calculate_quote($b->apartment_id, $b->date_start, $b->date_end); $dep = ceil($tot * 0.3);
+                        $is_status_1 = ($b->status == 1); $is_status_2 = ($b->status == 2 && $b->receipt_url); $limit_ts = strtotime($b->date_start) - (15 * 24 * 3600); $can_cancel = (($is_status_1 && time() < $limit_ts) || $is_status_2);
+                        $can_anonymize = true; if ($b->status == 1) { $gdpr_limit = strtotime($b->date_end) + (15 * 24 * 3600); if (time() < $gdpr_limit) $can_anonymize = false; }
                     ?>
                         <h3>Ciao <?php echo esc_html($b->guest_name); ?>,</h3>
                         <?php if ($viewers > 0 && $can_up): ?><div style="background:#fff3cd; color:#856404; padding:8px; border-radius:4px; margin-bottom:10px; font-size:13px;">⚡ <strong>Attenzione:</strong> Altre <?php echo $viewers; ?> persone stanno valutando queste date.</div><?php endif; ?>
@@ -362,66 +369,27 @@ function paguro_summary_render() {
                             <li>💶 <strong>Totale:</strong> €<?php echo $tot; ?> (Caparra: €<?php echo $dep; ?>)</li>
                             <li>💰 <strong>Stato:</strong> <?php if($b->status==1) echo '<span style="color:green;font-weight:bold;">CONFERMATA</span>'; elseif($b->status==3) echo '<span style="color:red;font-weight:bold;">CANCELLATA</span>'; elseif($b->receipt_url) echo '<span style="color:blue;">IN VERIFICA</span>'; else echo '<span style="color:orange;">ATTESA BONIFICO</span>'; ?></li>
                         </ul>
-                        
                         <?php if ($b->status == 3): ?>
-                            <p>Prenotazione annullata.</p>
+                            <p style="background:#f1f1f1; padding:10px;">Prenotazione annullata.</p>
                         <?php elseif ($b->receipt_url && $b->status != 1): ?>
                              <div style="margin-top:20px; text-align:center; padding:20px; background:#e7f9e7; border:1px solid #28a745; border-radius:8px;"><h2 style="color:#28a745;">Ricevuta Caricata! 🎉</h2><p>Controlla la tua mail per i dettagli.</p><a href="<?php echo esc_url($b->receipt_url); ?>" target="_blank" class="button">Vedi file</a></div>
-                             
-                             <div style="margin-top:20px; text-align:center; border-top:1px solid #eee; padding-top:10px;">
-                                <p><strong>Gestione e Cancellazione:</strong><br>Hai un imprevisto? Puoi ritirare la richiesta tramite il pulsante qui sotto:</p>
-                                <button class="button" style="background:#dc3545; color:white; border:none;" onclick="jQuery('#cancel-box').slideToggle()">Gestisci Cancellazione</button>
-                                <div id="cancel-box" style="display:none; margin-top:10px; padding:10px; background:#f9f9f9; border:1px solid #ddd;">
-                                    <p>Confermi di voler ritirare la richiesta?</p>
-                                    <form method="post">
-                                        <?php wp_nonce_field('paguro_cancel_action', 'paguro_cancel_nonce'); ?>
-                                        <input type="hidden" name="paguro_action" value="cancel_user_booking">
-                                        <input type="hidden" name="token" value="<?php echo $token; ?>">
-                                        <button type="submit" class="button" style="color:red;">Sì, Ritira Richiesta</button>
-                                    </form>
-                                </div>
-                             </div>
-
+                             <div style="margin-top:15px; text-align:center;"><form method="post" onsubmit="return confirm('Ritirare la richiesta?');"><?php wp_nonce_field('paguro_cancel_action', 'paguro_cancel_nonce'); ?><input type="hidden" name="paguro_action" value="cancel_user_booking"><input type="hidden" name="token" value="<?php echo $token; ?>"><button type="submit" class="button" style="color:#a00; border:none; background:none; text-decoration:underline;">Ritira Richiesta</button></form></div>
                         <?php elseif ($can_up): ?>
                             <div id="paguro-upload-area" style="margin-top:20px; border:2px dashed #0073aa; padding:30px; text-align:center; background:#fff; cursor:pointer;"><p>📂 <strong>Trascina qui la distinta (max 5Mb)</strong></p><input type="file" id="paguro-file-input" style="display:none;"><button class="button" onclick="document.getElementById('paguro-file-input').click()">Scegli</button><div id="paguro-upload-status" style="margin-top:10px;"></div></div><input type="hidden" id="paguro-token" value="<?php echo $token; ?>"><div style="margin-top:15px; background:#fff3cd; padding:10px; font-size:13px;">📢 Cancellazione gratuita fino a 15gg prima dell'arrivo.</div>
-                        
-                        <?php elseif (($is_status_1 && $in_time_cancel)): ?>
-                            <div style="margin-top:20px; text-align:center; border-top:1px solid #eee; padding-top:10px;">
-                                <p><strong>Gestione e Cancellazione:</strong><br>Hai un imprevisto? Puoi cancellare la prenotazione tramite il pulsante qui sotto:</p>
-                                <button class="button" style="background:#dc3545; color:white; border:none;" onclick="jQuery('#cancel-box').slideToggle()">Gestisci Cancellazione</button>
-                                <div id="cancel-box" style="display:none; margin-top:10px; padding:10px; background:#f9f9f9; border:1px solid #ddd;">
-                                    <p>Confermi la cancellazione? (Entro i termini: Rimborso Caparra)</p>
-                                    <form method="post">
-                                        <?php wp_nonce_field('paguro_cancel_action', 'paguro_cancel_nonce'); ?>
-                                        <input type="hidden" name="paguro_action" value="cancel_user_booking">
-                                        <input type="hidden" name="token" value="<?php echo $token; ?>">
-                                        <button type="submit" class="button" style="color:red;">Sì, Cancella</button>
-                                    </form>
-                                </div>
-                            </div>
+                        <?php elseif ($can_cancel && $b->status == 1): ?>
+                            <div style="margin-top:30px; padding-top:20px; border-top:1px solid #eee;"><form method="post" onsubmit="return confirm('Cancellare la prenotazione?');"><?php wp_nonce_field('paguro_cancel_action', 'paguro_cancel_nonce'); ?><input type="hidden" name="paguro_action" value="cancel_user_booking"><input type="hidden" name="token" value="<?php echo $token; ?>"><button type="submit" class="button" style="background:#dc3545; color:white; border:none; padding:10px 20px;">🚨 Cancella Prenotazione</button></form></div>
                         <?php endif; ?>
-
                         <?php if ($can_anonymize && strpos($b->guest_name, 'Anonimo') === false): ?>
-                            <div style="margin-top:30px; border-top:1px solid #eee; padding-top:10px; text-align:center;">
-                                <p style="font-size:11px; color:#888;">Privacy: Puoi rimuovere i tuoi dati dai nostri sistemi.</p>
-                                <form method="post" onsubmit="return confirm('Sei sicuro? I tuoi dati verranno cancellati per sempre.');">
-                                    <?php wp_nonce_field('paguro_anon_action', 'paguro_anon_nonce'); ?>
-                                    <input type="hidden" name="paguro_action" value="anonymize_user_data">
-                                    <input type="hidden" name="token" value="<?php echo $token; ?>">
-                                    <button type="submit" class="button" style="font-size:11px; background:#ccc;">Cancella i miei dati</button>
-                                </form>
-                            </div>
+                            <div style="margin-top:30px; text-align:center; font-size:11px;"><form method="post" onsubmit="return confirm('Irreversibile. Procedere?');"><?php wp_nonce_field('paguro_anon_action', 'paguro_anon_nonce'); ?><input type="hidden" name="paguro_action" value="anonymize_user_data"><input type="hidden" name="token" value="<?php echo $token; ?>"><button type="submit" class="button" style="background:#ccc; font-size:10px;">Cancella i miei dati (GDPR)</button></form></div>
                         <?php endif; ?>
-
                     <?php endif; } endif; ?>
         </div>
     </div>
     <?php return ob_get_clean();
 }
 
-// 12. RENDERER (Invariato v2.6.0)
 function paguro_render_interface($mode='widget'){ $icon_url=plugin_dir_url(__FILE__).'paguro_bot_icon.png'; $cls=($mode==='inline')?'paguro-mode-inline':'paguro-mode-widget'; ob_start(); ?>
-<style>.paguro-chat-root *{box-sizing:border-box} .paguro-mode-widget .paguro-chat-launcher{position:fixed;bottom:20px;right:20px;width:60px;height:60px;background:#fff;border-radius:50%;box-shadow:0 4px 12px rgba(0,0,0,.2);cursor:pointer;z-index:99999;display:flex;align-items:center;justify-content:center} .paguro-mode-widget .paguro-chat-window{position:fixed;bottom:90px;right:20px;width:280px;height:380px;max-width:90%;max-height:80vh;background:#fff;border-radius:12px;box-shadow:0 5px 20px rgba(0,0,0,.2);z-index:99999;display:none;flex-direction:column} .paguro-mode-inline .paguro-chat-launcher{display:none} .paguro-mode-inline .paguro-chat-window{position:relative;width:100%;height:600px;border:1px solid #ddd;background:#fff;border-radius:8px;display:flex;flex-direction:column} .paguro-chat-header{background:#0073aa;color:#fff;padding:10px 15px;display:flex;justify-content:space-between;align-items:center} .paguro-chat-body{flex:1;padding:15px;overflow-y:auto;background:#f9f9f9} .paguro-chat-footer{padding:10px;border-top:1px solid #eee;display:flex;gap:5px;background:#fff} .paguro-chat-footer input{flex:1;padding:8px;border:1px solid #ddd;border-radius:20px;font-size:13px} .paguro-msg{margin-bottom:10px;display:flex;gap:8px;align-items:flex-start} .paguro-msg-content{padding:8px 12px;border-radius:12px;font-size:13px;max-width:80%} .paguro-msg-user{flex-direction:row-reverse} .paguro-msg-user .paguro-msg-content{background:#0073aa;color:#fff} .paguro-msg-bot .paguro-msg-content{background:#e5e5ea;color:#000} .paguro-bot-avatar{width:30px;height:30px;border-radius:50%;flex-shrink:0;object-fit:cover;min-width:30px;min-height:30px} .paguro-book-btn{background:#28a745;color:#fff!important;padding:3px 6px;border-radius:4px;text-decoration:none;font-size:11px} .paguro-month-buttons{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px} .paguro-quick-btn{background:#fff;border:1px solid #0073aa;color:#0073aa;border-radius:15px;padding:3px 10px;font-size:11px;cursor:pointer;transition:0.2s;font-weight:500} .paguro-quick-btn:hover{background:#0073aa;color:#fff} </style>
+<style>.paguro-chat-root *{box-sizing:border-box} .paguro-mode-widget .paguro-chat-launcher{position:fixed;bottom:20px;right:20px;width:60px;height:60px;background:#fff;border-radius:50%;box-shadow:0 4px 12px rgba(0,0,0,.2);cursor:pointer;z-index:99999;display:flex;align-items:center;justify-content:center} .paguro-mode-widget .paguro-chat-window{position:fixed;bottom:90px;right:20px;width:280px;height:380px;max-width:90%;max-height:80vh;background:#fff;border-radius:12px;box-shadow:0 5px 20px rgba(0,0,0,.2);z-index:99999;display:none;flex-direction:column} .paguro-mode-inline .paguro-chat-launcher{display:none} .paguro-mode-inline .paguro-chat-window{position:relative;width:100%;height:600px;border:1px solid #ddd;background:#fff;border-radius:8px;display:flex;flex-direction:column} .paguro-chat-header{background:#0073aa;color:#fff;padding:10px 15px;display:flex;justify-content:space-between;align-items:center} .paguro-chat-body{flex:1;padding:15px;overflow-y:auto;background:#f9f9f9} .paguro-chat-footer{padding:10px;border-top:1px solid #eee;display:flex;gap:5px;background:#fff} .paguro-chat-footer input{flex:1;padding:8px;border:1px solid #ddd;border-radius:20px;font-size:13px} .paguro-msg{margin-bottom:10px;display:flex;gap:8px;align-items:flex-start} .paguro-msg-content{padding:8px 12px;border-radius:12px;font-size:13px;max-width:80%} .paguro-msg-user{flex-direction:row-reverse} .paguro-msg-user .paguro-msg-content{background:#0073aa;color:#fff} .paguro-msg-bot .paguro-msg-content{background:#e5e5ea;color:#000} .paguro-bot-avatar{width:30px;height:30px;border-radius:50%;flex-shrink:0;object-fit:cover;min-width:30px;min-height:30px} .paguro-book-btn{background:#28a745;color:#fff!important;padding:3px 6px;border-radius:4px;text-decoration:none;font-size:11px} .paguro-month-buttons{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px} .paguro-quick-btn{background:#fff;border:1px solid #0073aa;color:#0073aa;border-radius:15px;padding:3px 10px;font-size:11px;cursor:pointer;transition:0.2s;font-weight:500} .paguro-quick-btn:hover{background:#0073aa;color:#fff}</style>
 <div class="paguro-chat-root <?php echo $cls; ?>"><div class="paguro-chat-launcher" onclick="jQuery('.paguro-chat-window').fadeToggle()"><img src="<?php echo $icon_url; ?>"></div><div class="paguro-chat-window"><div class="paguro-chat-header"><span style="font-weight:bold;">Paguro</span><span class="close-btn" onclick="jQuery('.paguro-chat-window').fadeOut()" style="cursor:pointer;font-size:20px;">&times;</span></div><div class="paguro-chat-body" id="paguro-chat-body"><div class="paguro-msg paguro-msg-bot"><img src="<?php echo $icon_url; ?>" class="paguro-bot-avatar"><div class="paguro-msg-content">Ciao Sono Paguro, il tuo assistente virtuale.<br>Chiedimi informazioni o clicca sui mesi per conoscere le attuali disponibilità:<div class="paguro-month-buttons"><span class="paguro-quick-btn" data-msg="Disponibilità Giugno">Giugno</span><span class="paguro-quick-btn" data-msg="Disponibilità Luglio">Luglio</span><span class="paguro-quick-btn" data-msg="Disponibilità Agosto">Agosto</span><span class="paguro-quick-btn" data-msg="Disponibilità Settembre">Settembre</span></div></div></div></div><div class="paguro-chat-footer"><input type="text" id="paguro-input" placeholder="Scrivi qui..."><button id="paguro-send-btn" style="border:none;background:none;font-size:18px;cursor:pointer;">➤</button></div></div></div>
 <?php return ob_get_clean(); }
 add_shortcode('paguro_chat', function(){ if(!defined('PAGURO_WIDGET_RENDERED')){ define('PAGURO_WIDGET_RENDERED',true); return paguro_render_interface('inline'); }});
