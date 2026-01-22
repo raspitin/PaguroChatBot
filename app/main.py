@@ -8,18 +8,21 @@ from ollama import AsyncClient
 
 app = FastAPI()
 
-# --- CONFIGURAZIONE (Da variabili d'ambiente) ---
-INFLUX_URL = os.getenv("INFLUX_URL", "http://192.168.1.140:8086")
-INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "token-default")
-INFLUX_ORG = os.getenv("INFLUX_ORG", "PaguroChatBot")
-INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "paguro_analytics")
+# --- CONFIGURAZIONE (Solo da variabili d'ambiente per sicurezza) ---
+INFLUX_URL = os.getenv("INFLUX_URL")
+INFLUX_TOKEN = os.getenv("INFLUX_TOKEN")
+INFLUX_ORG = os.getenv("INFLUX_ORG")
+INFLUX_BUCKET = os.getenv("INFLUX_BUCKET")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://ollama:11434")
-MODEL_NAME = os.getenv("MODEL_NAME", "llama3.2:1b") # Default al modello migliore
+MODEL_NAME = os.getenv("MODEL_NAME", "llama3.2:1b")
+
+if not INFLUX_TOKEN:
+    print("WARNING: INFLUX_TOKEN non impostato. I log falliranno.")
 
 # Setup Clients
 influx_client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
 write_api = influx_client.write_api(write_options=SYNCHRONOUS)
-ollama_client = AsyncClient(host=OLLAMA_HOST) # Client Asincrono
+ollama_client = AsyncClient(host=OLLAMA_HOST)
 
 class ChatRequest(BaseModel):
     message: str
@@ -31,12 +34,15 @@ def log_to_influx(request_data: dict, headers: dict):
         country = headers.get("cf-ipcountry", "Unknown")
         ip = headers.get("cf-connecting-ip", "Unknown")
         
+        # Anonimizzazione basilare IP (in attesa di fix GDPR completo step 3)
+        ip_hash = str(hash(ip)) if ip else "unknown"
+
         point = (
             Point("chat_interaction")
             .tag("country", country)
             .tag("session_id", request_data.get("session_id"))
             .field("message_length", len(request_data.get("message", "")))
-            .field("ip_hash", str(hash(ip)))
+            .field("ip_hash", ip_hash)
             .time(datetime.utcnow())
         )
         write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=point)
@@ -52,9 +58,7 @@ async def chat_endpoint(chat_req: ChatRequest, request: Request, background_task
     headers = dict(request.headers)
     background_tasks.add_task(log_to_influx, chat_req.dict(), headers)
 
-    # 2. FAST PATH (Risposte immediate)
-    
-    # Saluti
+    # 2. FAST PATH
     saluti = ["ciao", "buongiorno", "buonasera", "salve", "hola", "ehi"]
     if any(x == user_msg for x in saluti) or (any(x in user_msg for x in saluti) and len(user_msg.split()) < 3):
         return {
@@ -62,7 +66,6 @@ async def chat_endpoint(chat_req: ChatRequest, request: Request, background_task
             "reply": "Ciao! Sono Paguro, il tuo assistente virtuale per Villa Celi. Cerchi disponibilità o informazioni?"
         }
 
-    # Foto / Media
     keywords_foto = ["foto", "vedere", "immagini", "interno", "esterni", "camere"]
     if any(k in user_msg for k in keywords_foto):
         link_foto_corallo = "https://www.villaceli.it/appartamento-corallo/" 
@@ -72,7 +75,6 @@ async def chat_endpoint(chat_req: ChatRequest, request: Request, background_task
             "reply": f"Certamente! Guarda qui: <br>• <a href='{link_foto_corallo}' target='_blank'>Appartamento Corallo</a><br>• <a href='{link_foto_tartaruga}' target='_blank'>Appartamento Tartaruga</a>"
         }
 
-    # Posizione
     keywords_pos = ["dove", "raggiungere", "arrivare", "mappa", "posizione", "strada"]
     if any(k in user_msg for k in keywords_pos) or ("dove" in user_msg and "siete" in user_msg):
         link_sito = "https://www.villaceli.it/dove-siamo/"
@@ -81,7 +83,6 @@ async def chat_endpoint(chat_req: ChatRequest, request: Request, background_task
             "reply": f"Siamo a Palinuro, immersi nel verde! 🌿<br>Trovi indicazioni e mappa <a href='{link_sito}' target='_blank'>sul nostro sito</a>."
         }
 
-    # Azioni (Prenotazione)
     keywords_prenotazione = ["prenot", "disponib", "prezzo", "costo", "luglio", "agosto", "settimana", "liber", "date"]
     if any(k in user_msg for k in keywords_prenotazione):
         return {
@@ -90,7 +91,7 @@ async def chat_endpoint(chat_req: ChatRequest, request: Request, background_task
             "reply": "Controllo subito il calendario..."
         }
 
-    # 3. SLOW PATH (IA Asincrona)
+    # 3. SLOW PATH
     try:
         system_prompt = (
             "Sei Paguro, assistente di Villa Celi. "
