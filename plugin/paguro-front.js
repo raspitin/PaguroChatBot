@@ -54,15 +54,17 @@ jQuery(document).ready(function($) {
     // 2. LOCK & REDIRECT
     $(document).on('click', '.paguro-book-btn', function(e) {
         e.preventDefault(); var btn = $(this); var originalText = btn.text(); if(btn.hasClass('locking')) return;
-        btn.addClass('locking').text('Blocco...');
+        btn.addClass('locking').text(paguroData.msgs.btn_locking);
         $.ajax({
             url: paguroData.ajax_url, type: 'POST',
             data: { action: 'paguro_lock_dates', nonce: paguroData.nonce, apt_name: btn.data('apt'), date_in: btn.data('in'), date_out: btn.data('out') },
             success: function(res) {
-                btn.removeClass('locking').text(originalText);
                 if(res.success) {
                     window.location.href = paguroData.booking_url + res.data.redirect_params;
-                } else { alert("⚠️ " + res.data.msg); }
+                } else { 
+                    btn.removeClass('locking').text(originalText); 
+                    alert("⚠️ " + res.data.msg); 
+                }
             }, error: function() { btn.removeClass('locking').text(originalText); alert("Errore Server."); }
         });
     });
@@ -73,6 +75,7 @@ jQuery(document).ready(function($) {
         var form = $(this);
         var btn = $('#paguro-submit-btn');
         var msg = $('#paguro-form-msg');
+        var originalBtnText = btn.text();
         
         btn.prop('disabled', true).text('Elaborazione...');
         msg.html('');
@@ -87,14 +90,14 @@ jQuery(document).ready(function($) {
                 url: paguroData.ajax_url, type: 'POST', data: data,
                 success: function(res) {
                     if (res.success) {
-                        msg.html('<span style="color:green; font-weight:bold;">Richiesta inviata! Reindirizzamento...</span>');
+                        msg.html('<span style="color:green; font-weight:bold;">'+paguroData.msgs.form_success+'</span>');
                         window.location.replace(res.data.redirect);
                     } else {
-                        btn.prop('disabled', false).text('Conferma Richiesta');
+                        btn.prop('disabled', false).text(originalBtnText);
                         msg.html('<span style="color:red;">' + res.data.msg + '</span>');
                     }
                 },
-                error: function() { btn.prop('disabled', false).text('Conferma Richiesta'); msg.html('<span style="color:red;">Errore di connessione.</span>'); }
+                error: function() { btn.prop('disabled', false).text(originalBtnText); msg.html('<span style="color:red;">'+paguroData.msgs.form_conn_error+'</span>'); }
             });
         }
 
@@ -107,7 +110,7 @@ jQuery(document).ready(function($) {
         } else { submitData(''); }
     });
 
-// DRAG & DROP & UPLOAD (FIXED CACHE REFRESH)
+// DRAG & DROP & UPLOAD (SECURED)
     var dropArea = $('#paguro-upload-area');
     if (dropArea.length > 0) {
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => { dropArea.on(eventName, function(e) { e.preventDefault(); e.stopPropagation(); }); });
@@ -120,7 +123,21 @@ jQuery(document).ready(function($) {
         
         function uploadFile(file) {
             var statusDiv = $('#paguro-upload-status');
-            statusDiv.html('<span style="color:#0073aa;">⏳ Caricamento in corso...</span>');
+            
+            // SECURITY CHECKS JS
+            // 1. Max Size (5MB)
+            if (file.size > 5 * 1024 * 1024) {
+                statusDiv.html('<span style="color:red;">❌ File troppo grande (Max 5MB).</span>');
+                return;
+            }
+            // 2. MIME Type
+            var validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+            if ($.inArray(file.type, validTypes) < 0) {
+                statusDiv.html('<span style="color:red;">❌ Formato non valido. Solo PDF o JPG/PNG.</span>');
+                return;
+            }
+
+            statusDiv.html('<span style="color:#0073aa;">'+paguroData.msgs.upload_loading+'</span>');
             
             var formData = new FormData();
             formData.append('action', 'paguro_upload_receipt'); 
@@ -132,20 +149,18 @@ jQuery(document).ready(function($) {
                 url: paguroData.ajax_url, type: 'POST', data: formData, contentType: false, processData: false,
                 success: function(response) {
                     if (response.success) { 
-                        // IMMEDIATE UI SWAP
                         $('#paguro-upload-area').replaceWith(
                             '<div style="margin-top:20px; padding:20px; background:#e7f9e7; border:1px solid green; border-radius:8px; text-align:center;">' +
-                            '<h3 style="color:green; margin:0;">✅ Distinta Caricata!</h3>' +
+                            '<h3 style="color:green; margin:0;">'+paguroData.msgs.upload_success+'</h3>' + 
                             '<p>Attendi un istante...</p></div>'
                         );
-                        // HARD RELOAD WITH TIMESTAMP TO BYPASS CACHE
                         setTimeout(function(){ 
                             window.location.href = window.location.href.split('#')[0] + '&t=' + new Date().getTime();
                         }, 1500); 
                     } 
                     else { statusDiv.html('<span style="color:red;">❌ ' + response.data.msg + '</span>'); }
                 }, 
-                error: function() { statusDiv.html('<span style="color:red;">❌ Errore server.</span>'); }
+                error: function() { statusDiv.html('<span style="color:red;">'+paguroData.msgs.upload_error+'</span>'); }
             });
         }
     }
