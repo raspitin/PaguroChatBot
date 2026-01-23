@@ -1,15 +1,28 @@
 <?php
 /**
  * Plugin Name: Paguro ChatBot
- * Description: Versione 2.9.5 - Fix Email Shortcodes (Quote & Count)
- * Version: 2.9.5
+ * Description: Versione 2.9.9 - Refund Notification Feature
+ * Version: 2.9.9
  * Author: Tuo Nome
  */
 
 if (!defined('ABSPATH')) exit;
 
-// 1. SETUP & DB
-register_activation_hook(__FILE__, 'paguro_create_tables');
+// 1. SETUP & DB & CRON
+register_activation_hook(__FILE__, 'paguro_activate_plugin');
+register_deactivation_hook(__FILE__, 'paguro_deactivate_plugin');
+
+function paguro_activate_plugin() {
+    paguro_create_tables();
+    if (!wp_next_scheduled('paguro_daily_cleanup_event')) {
+        wp_schedule_event(time(), 'daily', 'paguro_daily_cleanup_event');
+    }
+}
+
+function paguro_deactivate_plugin() {
+    wp_clear_scheduled_hook('paguro_daily_cleanup_event');
+}
+
 function paguro_create_tables() {
     global $wpdb; $charset = $wpdb->get_charset_collate();
     
@@ -43,11 +56,22 @@ function paguro_set_defaults() {
     add_option('paguro_recaptcha_secret', '');
     add_option('paguro_api_url', 'https://api.viamerano24.it/chat');
     add_option('paguro_msg_ui_social_pressure', '⚡ <strong>Affrettati!</strong> Altre {count} richieste in corso per queste date.');
+    
+    // NUOVO DEFAULT: Mail Conferma Rimborso
+    add_option('paguro_txt_email_refund_ok_subj', 'Conferma Rimborso - {apt_name}');
+    add_option('paguro_txt_email_refund_ok_body', "<h2>Gentile {guest_name},</h2><p>Ti confermiamo che abbiamo preso in carico la tua richiesta di rimborso per l'appartamento {apt_name} (Dal {date_start}).</p><p>L'importo sarà riaccreditato a breve sulle coordinate di provenienza.</p>");
+}
+
+// CRON JOB FUNCTION
+add_action('paguro_daily_cleanup_event', 'paguro_do_cleanup');
+function paguro_do_cleanup() {
+    global $wpdb;
+    $wpdb->query("DELETE FROM {$wpdb->prefix}paguro_availability WHERE status=2 AND ((lock_expires IS NOT NULL AND lock_expires < NOW()) OR (lock_expires IS NULL AND created_at < DATE_SUB(NOW(), INTERVAL 48 HOUR)))");
 }
 
 add_action('plugins_loaded', 'paguro_update_db_structure');
 function paguro_update_db_structure() {
-    if (get_transient('paguro_db_check_295')) return;
+    if (get_transient('paguro_db_check_299')) return;
     global $wpdb; 
     $t1 = $wpdb->prefix . 'paguro_availability'; $cols1 = $wpdb->get_col("DESC $t1", 0);
     if (!in_array('lock_expires', $cols1)) $wpdb->query("ALTER TABLE $t1 ADD COLUMN lock_expires DATETIME NULL");
@@ -60,7 +84,7 @@ function paguro_update_db_structure() {
     if (!in_array('pricing_json', $cols2)) $wpdb->query("ALTER TABLE $t2 ADD COLUMN pricing_json LONGTEXT NULL");
     
     paguro_set_defaults();
-    set_transient('paguro_db_check_295', true, DAY_IN_SECONDS);
+    set_transient('paguro_db_check_299', true, DAY_IN_SECONDS);
 }
 
 // 2. HELPER LOGGING & EMAIL
@@ -105,7 +129,7 @@ function paguro_render_admin_page() {
 // 4. ASSETS
 add_action('wp_enqueue_scripts', 'paguro_enqueue_scripts');
 function paguro_enqueue_scripts() {
-    wp_enqueue_script('paguro-js', plugin_dir_url(__FILE__) . 'paguro-front.js', ['jquery'], '2.9.5', true);
+    wp_enqueue_script('paguro-js', plugin_dir_url(__FILE__) . 'paguro-front.js', ['jquery'], '2.9.9', true);
     $site_key = get_option('paguro_recaptcha_site');
     if ($site_key) wp_enqueue_script('google-recaptcha', 'https://www.google.com/recaptcha/api.js?render=' . $site_key, [], null, true);
     
@@ -311,7 +335,7 @@ function paguro_handle_lock() {
     } catch (Exception $e) { wp_send_json_error(['msg'=>$e->getMessage()]); }
 }
 
-// 8. SUBMIT (FIXED FOR QUOTES & SHORTCODES)
+// 8. SUBMIT
 add_action('wp_ajax_paguro_submit_booking', 'paguro_submit_booking'); add_action('wp_ajax_nopriv_paguro_submit_booking', 'paguro_submit_booking');
 function paguro_submit_booking() {
     check_ajax_referer('paguro_chat_nonce', 'nonce'); global $wpdb;
@@ -322,14 +346,14 @@ function paguro_submit_booking() {
     $booking = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$wpdb->prefix}paguro_availability WHERE lock_token = %s", $token));
     paguro_add_history($booking->id, 'REQUEST_SENT', "Richiesta da $name");
     
-    // Mail Richiesta: Calcolo Dati Aggiuntivi per Shortcode
+    // Mail Richiesta
     $booking_details = $wpdb->get_row($wpdb->prepare("SELECT b.*, a.name as apt_name FROM {$wpdb->prefix}paguro_availability b JOIN {$wpdb->prefix}paguro_apartments a ON b.apartment_id=a.id WHERE b.id=%d", $booking->id));
     
     // Calcolo Preventivo
     $tot = paguro_calculate_quote($booking->apartment_id, $booking->date_start, $booking->date_end);
     $dep = ceil($tot * 0.3);
     
-    // Calcolo Competitors (Social Pressure)
+    // Calcolo Competitors
     $competitors = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->prefix}paguro_availability WHERE apartment_id=%d AND status=2 AND receipt_url IS NULL AND id!=%d AND (date_start < %s AND date_end > %s)", $booking->apartment_id, $booking->id, $booking->date_end, $booking->date_start));
 
     $ph = [
@@ -459,21 +483,33 @@ function paguro_summary_render() {
                         
                         $race_winner = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$wpdb->prefix}paguro_availability WHERE apartment_id=%d AND status=2 AND receipt_url IS NOT NULL AND id!=%d AND (date_start < %s AND date_end > %s)", $b->apartment_id, $b->id, $b->date_end, $b->date_start));
                         
-                        // NEW: Count competitors (Pending requests without receipt)
+                        // Count competitors
                         $competitors = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->prefix}paguro_availability WHERE apartment_id=%d AND status=2 AND receipt_url IS NULL AND id!=%d AND (date_start < %s AND date_end > %s)", $b->apartment_id, $b->id, $b->date_end, $b->date_start));
 
                         $exp = $b->lock_expires ? strtotime($b->lock_expires) : (strtotime($b->created_at)+48*3600);
                         $can_up = ($b->status == 2 && time() < $exp && !$race_winner);
                         $tot = paguro_calculate_quote($b->apartment_id, $b->date_start, $b->date_end);
+                        $dep = ceil($tot * 0.3);
                         
                         $status_txt = ($b->status==1)? get_option('paguro_msg_status_confirmed','CONFERMATA') : (($b->status==3)? get_option('paguro_msg_status_cancelled','CANCELLATA') : get_option('paguro_msg_status_pending','PENDING'));
+                        
+                        // --- PREPARE PLACEHOLDERS FOR ALERTS ---
+                        $ph = [
+                            'guest_name' => $b->guest_name,
+                            'apt_name' => ucfirst($b->apt_name),
+                            'date_start' => date('d/m/Y', strtotime($b->date_start)),
+                            'date_end' => date('d/m/Y', strtotime($b->date_end)),
+                            'count' => $competitors,
+                            'total_cost' => $tot,
+                            'deposit_cost' => $dep
+                        ];
                     ?>
                         <h3>Ciao <?php echo esc_html($b->guest_name); ?>,</h3>
                         
                         <?php 
                         // ALERT 1: Social Pressure (Yellow)
                         if ($competitors > 0 && !$race_winner && $b->status == 2): 
-                            $msg_press = str_replace('{count}', $competitors, get_option('paguro_msg_ui_social_pressure', '⚡ <strong>Affrettati!</strong> Altre {count} richieste in corso per queste date.'));
+                            $msg_press = paguro_parse_template(get_option('paguro_msg_ui_social_pressure', '⚡ <strong>Affrettati!</strong> Altre {count} richieste in corso per queste date.'), $ph);
                         ?>
                             <div style="background:#fff3cd; color:#856404; padding:15px; border:1px solid #ffeeba; border-radius:5px; margin-bottom:15px;">
                                 <?php echo $msg_press; ?>
@@ -482,9 +518,11 @@ function paguro_summary_render() {
 
                         <?php 
                         // ALERT 2: Race Lost (Red)
-                        if ($race_winner && $b->status != 3): ?>
+                        if ($race_winner && $b->status != 3): 
+                            $msg_race = paguro_parse_template(get_option('paguro_msg_ui_race_warning', '⚠️ Priorità persa.'), $ph);
+                        ?>
                             <div style="background:#f8d7da; color:#721c24; padding:15px; border:1px solid #f5c6cb; border-radius:5px; margin-bottom:15px;">
-                                <p><?php echo get_option('paguro_msg_ui_race_warning', '⚠️ Priorità persa.'); ?></p>
+                                <?php echo $msg_race; ?>
                                 <form method="post" style="margin-top:10px;">
                                     <?php wp_nonce_field('paguro_race_action', 'paguro_race_nonce'); ?>
                                     <input type="hidden" name="paguro_action" value="resolve_race_conflict">
