@@ -1,167 +1,212 @@
 jQuery(document).ready(function($) {
+    const data = paguroData; // Shortcut per i dati passati da PHP
+
+    // ==========================================
+    // 1. GESTIONE INTERFACCIA CHAT
+    // ==========================================
     
-    // 1. CHAT UI
-    $('.paguro-chat-launcher').on('click', function() { $('.paguro-chat-widget').fadeToggle(); });
-    $('.paguro-chat-header .close-btn').on('click', function() { $('.paguro-chat-widget').fadeOut(); });
-    $('#paguro-send-btn').on('click', function() { sendMessage(); });
-    $('#paguro-input').on('keypress', function(e) { if(e.which == 13) sendMessage(); });
-
-    $(document).on('click', '.paguro-quick-btn', function() {
-        var txt = $(this).data('msg');
-        appendMessage("user", txt); 
-        processMessage(txt); 
+    // Apri/Chiudi Chat
+    $('.paguro-chat-launcher, .close-btn').on('click', function() {
+        $('.paguro-chat-window').fadeToggle();
     });
 
-    function sendMessage() {
-        var msg = $('#paguro-input').val().trim(); if(msg === "") return;
-        appendMessage("user", msg); $('#paguro-input').val(''); 
-        processMessage(msg);
+    // Helper: Scroll automatico in basso
+    function scrollToBottom() {
+        var body = $('#paguro-chat-body');
+        body.scrollTop(body[0].scrollHeight);
     }
 
-    function processMessage(msg) {
-        $('#paguro-chat-body').scrollTop($('#paguro-chat-body')[0].scrollHeight);
-        var loadingId = appendMessage("bot", '<span class="paguro-typing">...</span>');
-        if (!localStorage.getItem('paguro_session_id')) localStorage.setItem('paguro_session_id', 'sess_' + Math.random().toString(36).substr(2, 9));
+    // Helper: Aggiungi messaggio utente
+    function appendUserMsg(text) {
+        $('#paguro-chat-body').append('<div class="paguro-msg paguro-msg-user"><div class="paguro-msg-content">' + text + '</div></div>');
+        scrollToBottom();
+    }
+
+    // Helper: Aggiungi messaggio bot
+    function appendBotMsg(html) {
+        $('#paguro-chat-body').append('<div class="paguro-msg paguro-msg-bot"><img src="' + data.icon_url + '" class="paguro-bot-avatar"><div class="paguro-msg-content">' + html + '</div></div>');
+        scrollToBottom();
+    }
+
+    // Funzione invio messaggio al server
+    function sendMsg(msg, offset=0, month='') {
+        if (!msg) return;
+        if(offset===0) appendUserMsg(msg);
         
-        $.ajax({
-            url: paguroData.ajax_url, type: 'POST',
-            data: { action: 'paguro_chat_request', nonce: paguroData.nonce, message: msg, session_id: localStorage.getItem('paguro_session_id') },
-            success: function(response) {
-                removeMessage(loadingId);
-                if(response.success) {
-                    var data = response.data;
-                    if(data.type === 'ACTION' && data.action === 'CHECK_AVAILABILITY') { appendMessage("bot", data.reply); bindLoadMore(); }
-                    else { appendMessage("bot", data.reply); }
-                } else { appendMessage("bot", response.data ? response.data.reply : "Errore generico."); }
-            },
-            error: function(xhr) { removeMessage(loadingId); appendMessage("bot", "⚠️ Errore (" + xhr.status + ")."); }
+        // Feedback visivo (opzionale)
+        // appendBotMsg('...'); 
+        
+        $.post(data.ajax_url, {
+            action: 'paguro_chat_request',
+            nonce: data.nonce,
+            message: msg,
+            session_id: 'sess_' + Date.now(), // ID sessione semplice
+            offset: offset,
+            filter_month: month
+        }, function(res) {
+            // Rimuovi eventuali loader se messi
+            if (res.success) {
+                appendBotMsg(res.data.reply);
+            } else {
+                appendBotMsg("⚠️ " + (res.data.reply || "Errore di connessione"));
+            }
+        }).fail(function() {
+            appendBotMsg("⚠️ Errore di rete.");
         });
     }
 
-    function bindLoadMore() { $('.paguro-load-more').off('click').on('click', function(e) { e.preventDefault(); loadMoreDates($(this)); }); }
-    function loadMoreDates(btn) {
-        var aptId = btn.data('apt'); var offset = btn.data('offset'); var month = btn.data('month');
-        btn.text('Caricamento...').css('opacity', '0.5');
-        $.ajax({
-            url: paguroData.ajax_url, type: 'POST',
-            data: { action: 'paguro_chat_request', nonce: paguroData.nonce, message: "LOAD_MORE", session_id: localStorage.getItem('paguro_session_id'), offset: offset, apt_id: aptId, filter_month: month },
-            success: function(response) { btn.hide(); if(response.success) { appendMessage("bot", response.data.reply); bindLoadMore(); } }
-        });
-    }
-    function appendMessage(s, t) { var id='msg_'+Math.random().toString(36); var cls=(s==="user")?"paguro-msg-user":"paguro-msg-bot"; var ic=(s==='bot'&&paguroData.icon_url)?'<img src="'+paguroData.icon_url+'" class="paguro-bot-avatar">':''; $('#paguro-chat-body').append('<div id="'+id+'" class="paguro-msg '+cls+'">'+ic+'<div class="paguro-msg-content">'+t+'</div></div>'); $('#paguro-chat-body').scrollTop($('#paguro-chat-body')[0].scrollHeight); return id; }
-    function removeMessage(id) { $('#' + id).remove(); }
+    // Click bottone Invio
+    $('#paguro-send-btn').click(function() {
+        var input = $('#paguro-input');
+        var txt = input.val().trim();
+        if (txt) {
+            sendMsg(txt);
+            input.val('');
+        }
+    });
 
-    // 2. LOCK & REDIRECT
+    // Invio con tasto Enter
+    $('#paguro-input').keypress(function(e) {
+        if (e.which == 13) $('#paguro-send-btn').click();
+    });
+
+    // Click sui Bottoni Rapidi (Mesi)
+    $(document).on('click', '.paguro-quick-btn', function() {
+        var msg = $(this).data('msg');
+        sendMsg(msg);
+    });
+
+    // Click su "Altre..." (Paginazione risultati)
+    $(document).on('click', '.paguro-load-more', function(e) {
+        e.preventDefault();
+        var off = $(this).data('offset');
+        var m = $(this).data('month');
+        
+        // Nascondi il link "altre" appena cliccato
+        $(this).parent().hide();
+        
+        // Richiedi i prossimi risultati
+        sendMsg("Availability", off, m); 
+    });
+
+    // ==========================================
+    // 2. LOGICA PRENOTAZIONE (LOCK DATE)
+    // ==========================================
     $(document).on('click', '.paguro-book-btn', function(e) {
-        e.preventDefault(); var btn = $(this); var originalText = btn.text(); if(btn.hasClass('locking')) return;
-        btn.addClass('locking').text(paguroData.msgs.btn_locking);
-        $.ajax({
-            url: paguroData.ajax_url, type: 'POST',
-            data: { action: 'paguro_lock_dates', nonce: paguroData.nonce, apt_name: btn.data('apt'), date_in: btn.data('in'), date_out: btn.data('out') },
-            success: function(res) {
-                if(res.success) {
-                    window.location.href = paguroData.booking_url + res.data.redirect_params;
-                } else { 
-                    btn.removeClass('locking').text(originalText); 
-                    alert("⚠️ " + res.data.msg); 
-                }
-            }, error: function() { btn.removeClass('locking').text(originalText); alert("Errore Server."); }
+        e.preventDefault();
+        var btn = $(this);
+        var oldTxt = btn.text();
+        
+        // Feedback visivo sul bottone
+        btn.text(data.msgs.btn_locking).prop('disabled', true);
+
+        $.post(data.ajax_url, {
+            action: 'paguro_lock_dates',
+            nonce: data.nonce,
+            apt_name: btn.data('apt'),
+            date_in: btn.data('in'),
+            date_out: btn.data('out')
+        }, function(res) {
+            if (res.success) {
+                // REDIRECT ALLA FORM DI CHECKOUT (Pagina 1)
+                // Usa l'URL configurato nel backend + i parametri token
+                window.location.href = data.booking_url + res.data.redirect_params;
+            } else {
+                alert("❌ " + res.data.msg); // Es. "Occupato"
+                btn.text(oldTxt).prop('disabled', false);
+            }
+        }).fail(function() {
+            alert("Errore di connessione.");
+            btn.text(oldTxt).prop('disabled', false);
         });
     });
 
-    // 3. NATIVE FORM SUBMIT
+    // ==========================================
+    // 3. INVIO FORM DATI OSPITE (CHECKOUT)
+    // ==========================================
     $('#paguro-native-form').on('submit', function(e) {
         e.preventDefault();
-        var form = $(this);
         var btn = $('#paguro-submit-btn');
-        var msg = $('#paguro-form-msg');
-        var originalBtnText = btn.text();
-        
-        btn.prop('disabled', true).text('Elaborazione...');
-        msg.html('');
+        btn.prop('disabled', true);
+        $('#paguro-form-msg').html('');
 
-        function submitData(tokenRecaptcha) {
-            var data = form.serializeArray();
-            data.push({name: 'action', value: 'paguro_submit_booking'});
-            data.push({name: 'nonce', value: paguroData.nonce});
-            if(tokenRecaptcha) data.push({name: 'recaptcha_token', value: tokenRecaptcha});
+        var formData = $(this).serialize();
+        formData += '&action=paguro_submit_booking&nonce=' + data.nonce;
 
-            $.ajax({
-                url: paguroData.ajax_url, type: 'POST', data: data,
-                success: function(res) {
-                    if (res.success) {
-                        msg.html('<span style="color:green; font-weight:bold;">'+paguroData.msgs.form_success+'</span>');
-                        window.location.replace(res.data.redirect);
-                    } else {
-                        btn.prop('disabled', false).text(originalBtnText);
-                        msg.html('<span style="color:red;">' + res.data.msg + '</span>');
-                    }
-                },
-                error: function() { btn.prop('disabled', false).text(originalBtnText); msg.html('<span style="color:red;">'+paguroData.msgs.form_conn_error+'</span>'); }
-            });
-        }
-
-        if (paguroData.recaptcha_site) {
-            grecaptcha.ready(function() {
-                grecaptcha.execute(paguroData.recaptcha_site, {action: 'submit'}).then(function(token) {
-                    submitData(token);
-                });
-            });
-        } else { submitData(''); }
+        $.post(data.ajax_url, formData, function(res) {
+            if (res.success) {
+                $('#paguro-form-msg').html('<span style="color:green">' + data.msgs.form_success + '</span>');
+                // Redirect alla pagina di Riepilogo (Pagina 2)
+                setTimeout(function() {
+                    window.location.href = res.data.redirect;
+                }, 1000);
+            } else {
+                $('#paguro-form-msg').html('<span style="color:red">' + res.data.msg + '</span>');
+                btn.prop('disabled', false);
+            }
+        }).fail(function() {
+            $('#paguro-form-msg').html('<span style="color:red">' + data.msgs.form_conn_error + '</span>');
+            btn.prop('disabled', false);
+        });
     });
 
-// DRAG & DROP & UPLOAD (SECURED)
-    var dropArea = $('#paguro-upload-area');
-    if (dropArea.length > 0) {
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => { dropArea.on(eventName, function(e) { e.preventDefault(); e.stopPropagation(); }); });
-        dropArea.on('dragenter dragover', function() { $(this).css('background', '#e7f5fe').css('border-color', '#005b88'); });
-        dropArea.on('dragleave drop', function() { $(this).css('background', '#fff').css('border-color', '#0073aa'); });
-        dropArea.on('drop', function(e) { handleFiles(e.originalEvent.dataTransfer.files); });
-        $('#paguro-file-input').on('change', function() { handleFiles(this.files); });
+    // ==========================================
+    // 4. UPLOAD DISTINTA (FIX A05 UI)
+    // ==========================================
+    $('#paguro-file-input').on('change', function() {
+        var file = this.files[0];
+        if (!file) return;
 
-        function handleFiles(files) { if (files.length === 0) return; uploadFile(files[0]); }
-        
-        function uploadFile(file) {
-            var statusDiv = $('#paguro-upload-status');
-            
-            // SECURITY CHECKS JS
-            // 1. Max Size (5MB)
-            if (file.size > 5 * 1024 * 1024) {
-                statusDiv.html('<span style="color:red;">❌ File troppo grande (Max 5MB).</span>');
-                return;
-            }
-            // 2. MIME Type
-            var validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
-            if ($.inArray(file.type, validTypes) < 0) {
-                statusDiv.html('<span style="color:red;">❌ Formato non valido. Solo PDF o JPG/PNG.</span>');
-                return;
-            }
-
-            statusDiv.html('<span style="color:#0073aa;">'+paguroData.msgs.upload_loading+'</span>');
-            
-            var formData = new FormData();
-            formData.append('action', 'paguro_upload_receipt'); 
-            formData.append('nonce', paguroData.nonce); 
-            formData.append('file', file); 
-            formData.append('token', $('#paguro-token').val());
-            
-            $.ajax({
-                url: paguroData.ajax_url, type: 'POST', data: formData, contentType: false, processData: false,
-                success: function(response) {
-                    if (response.success) { 
-                        $('#paguro-upload-area').replaceWith(
-                            '<div style="margin-top:20px; padding:20px; background:#e7f9e7; border:1px solid green; border-radius:8px; text-align:center;">' +
-                            '<h3 style="color:green; margin:0;">'+paguroData.msgs.upload_success+'</h3>' + 
-                            '<p>Attendi un istante...</p></div>'
-                        );
-                        setTimeout(function(){ 
-                            window.location.href = window.location.href.split('#')[0] + '&t=' + new Date().getTime();
-                        }, 1500); 
-                    } 
-                    else { statusDiv.html('<span style="color:red;">❌ ' + response.data.msg + '</span>'); }
-                }, 
-                error: function() { statusDiv.html('<span style="color:red;">'+paguroData.msgs.upload_error+'</span>'); }
-            });
+        // Validazione Client-Side base
+        if (file.size > 5 * 1024 * 1024) {
+            alert("File troppo grande (Max 5MB)");
+            return;
         }
-    }
+
+        var formData = new FormData();
+        formData.append('action', 'paguro_upload_receipt');
+        formData.append('nonce', data.nonce);
+        formData.append('token', $('#paguro-token').val());
+        formData.append('file', file);
+
+        $('#paguro-upload-status').html(data.msgs.upload_loading).css('color', 'blue');
+
+        $.ajax({
+            url: data.ajax_url,
+            type: 'POST',
+            data: formData,
+            contentType: false,
+            processData: false,
+            success: function(res) {
+                if (res.success) {
+                    // --- QUI IL FIX UI RICHIESTO ---
+                    
+                    // 1. Nascondi il box di upload (quello tratteggiato)
+                    $('#paguro-upload-area').slideUp();
+                    
+                    // 2. Assicurati che il contenitore di successo esista (creato dal PHP v3.0.7) o mostralo
+                    // Se per caso il PHP non lo ha renderizzato (cache vecchia), lo creiamo al volo per sicurezza
+                    if ($('#paguro-upload-success-container').length === 0) {
+                         $('<div id="paguro-upload-success-container" style="display:none; margin-top:20px; padding:20px; background:#e7f9e7; border:1px solid green; text-align:center;"><h3>✅ Distinta Ricevuta!</h3><p>Il file è stato caricato correttamente.</p><div id="paguro-view-link"></div></div>').insertAfter('#paguro-upload-area');
+                    }
+                    
+                    // 3. Mostra il box di successo
+                    $('#paguro-upload-success-container').slideDown();
+                    
+                    // 4. Inserisci il bottone "Visualizza" con il link restituito dal server
+                    var btnHtml = '<a href="' + res.data.url + '" target="_blank" class="button" style="background:#0073aa; color:#fff; padding:10px 20px; text-decoration:none; border-radius:4px; display:inline-block; margin-top:10px;">📄 Visualizza Distinta</a>';
+                    $('#paguro-view-link').html(btnHtml);
+                    
+                    // Pulisci status vecchi
+                    $('#paguro-upload-status').html(''); 
+                } else {
+                    $('#paguro-upload-status').html('❌ ' + res.data.msg).css('color', 'red');
+                }
+            },
+            error: function() {
+                $('#paguro-upload-status').html(data.msgs.upload_error).css('color', 'red');
+            }
+        });
+    });
+
 });

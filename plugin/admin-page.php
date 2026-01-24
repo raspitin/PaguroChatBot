@@ -6,6 +6,7 @@ $table_avail = $wpdb->prefix . 'paguro_availability';
 $table_apt   = $wpdb->prefix . 'paguro_apartments';
 $current_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'bookings';
 
+// --- SALVATAGGIO OPZIONI ---
 if (isset($_POST['paguro_save_opts']) && check_admin_referer('paguro_admin_opts')) {
     update_option('paguro_season_start', sanitize_text_field(stripslashes($_POST['season_start'])));
     update_option('paguro_season_end', sanitize_text_field(stripslashes($_POST['season_end'])));
@@ -62,6 +63,7 @@ if (isset($_POST['paguro_save_opts']) && check_admin_referer('paguro_admin_opts'
     echo '<div class="notice notice-success"><p>Configurazione Salvata.</p></div>';
 }
 
+// --- GESTIONE APPARTAMENTI ---
 if (isset($_POST['paguro_apt_action'])) {
     if (!check_admin_referer('paguro_apt_nonce', 'paguro_apt_nonce')) wp_die('Sicurezza.');
     if ($_POST['paguro_apt_action'] === 'add_apt') { $name = sanitize_text_field($_POST['apt_name']); if ($name) $wpdb->insert($table_apt, ['name' => $name, 'base_price' => 500]); }
@@ -75,63 +77,119 @@ if (isset($_POST['paguro_apt_action'])) {
     }
 }
 
+// --- AZIONI SULLE PRENOTAZIONI ---
 if (isset($_POST['paguro_action'])) {
     if (!check_admin_referer('paguro_admin_action', 'paguro_nonce')) wp_die('Sicurezza.');
-    $req_id = intval($_POST['request_id']);
-    $w = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table_avail WHERE id=%d", $req_id));
     
-    if ($_POST['paguro_action'] === 'anonymize_admin') {
-        $cleaned_log = json_encode([['time'=>current_time('mysql'), 'action'=>'GDPR_WIPE', 'details'=>'Data wiped by Admin']]);
-        $wpdb->update($table_avail, ['guest_name'=>'Anonimo (Admin)','guest_email'=>'deleted@admin.act','guest_phone'=>'0000','guest_notes'=>'', 'history_log'=>$cleaned_log], ['id'=>$req_id]);
-        echo '<div class="notice notice-success"><p>Anonimizzato.</p></div>';
-    }
+    // Gestione Inserimento Manuale
+    if ($_POST['paguro_action'] === 'manual_add_booking') {
+        $m_apt = intval($_POST['m_apt_id']);
+        $m_start = sanitize_text_field($_POST['m_start']);
+        $m_end = sanitize_text_field($_POST['m_end']);
+        $m_name = sanitize_text_field($_POST['m_name']);
+        $m_email = sanitize_email($_POST['m_email']);
+        $m_phone = sanitize_text_field($_POST['m_phone']);
+        $m_notes = sanitize_textarea_field($_POST['m_notes']);
 
-    if ($w) {
-        $apt_row = $wpdb->get_row($wpdb->prepare("SELECT name, pricing_json, base_price FROM $table_apt WHERE id=%d", $w->apartment_id));
-        $tot = paguro_calculate_quote($w->apartment_id, $w->date_start, $w->date_end);
-        $dep_percent = intval(get_option('paguro_deposit_percent', 30)) / 100;
-        $dep = ceil($tot * $dep_percent);
-        $competitors = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table_avail WHERE apartment_id=%d AND status=2 AND receipt_url IS NULL AND id!=%d AND (date_start < %s AND date_end > %s)", $w->apartment_id, $w->id, $w->date_end, $w->date_start));
-
-        $ph = [
-            'guest_name' => $w->guest_name, 'date_start' => date('d/m/Y',strtotime($w->date_start)), 'date_end' => date('d/m/Y',strtotime($w->date_end)), 
-            'apt_name' => ucfirst($apt_row->name ?? ''), 'link_riepilogo' => site_url("/".get_option('paguro_page_slug')."/?token={$w->lock_token}"),
-            'total_cost' => $tot, 'deposit_cost' => $dep, 'count' => $competitors, 'receipt_url' => $w->receipt_url ?? '#',
-            'id' => $w->id, 'guest_phone' => $w->guest_phone
-        ];
+        if ($m_start >= $m_end) {
+            echo '<div class="notice notice-error"><p>Errore Date: L\'arrivo deve essere precedente alla partenza.</p></div>';
+        } else {
+            // Controllo Sovrapposizioni (Solo status 1 Confermati)
+            $overlap = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM $table_avail WHERE apartment_id=%d AND status=1 AND (date_start < %s AND date_end > %s)",
+                $m_apt, $m_end, $m_start
+            ));
+            
+            if ($overlap > 0) {
+                echo '<div class="notice notice-error"><p>Errore: Le date selezionate si sovrappongono a una prenotazione CONFERMATA esistente.</p></div>';
+            } else {
+                $token = bin2hex(random_bytes(16));
+                $hist = json_encode([['time'=>current_time('mysql'), 'action'=>'ADMIN_MANUAL_ADD', 'details'=>'Inserimento manuale da pannello']]);
+                
+                // Nota: Il prezzo non viene salvato nel DB, è calcolato al volo. 
+                // L'inserimento manuale crea solo il record di disponibilità.
+                
+                $wpdb->insert($table_avail, [
+                    'apartment_id' => $m_apt,
+                    'date_start' => $m_start,
+                    'date_end' => $m_end,
+                    'guest_name' => $m_name,
+                    'guest_email' => $m_email,
+                    'guest_phone' => $m_phone,
+                    'guest_notes' => $m_notes,
+                    'status' => 1, // Confermato direttamente
+                    'lock_token' => $token,
+                    'history_log' => $hist,
+                    'created_at' => current_time('mysql')
+                ]);
+                echo '<div class="notice notice-success"><p>Prenotazione Manuale Inserita con successo (Stato: Confermata).</p></div>';
+            }
+        }
+    } else {
+        // Altre azioni esistenti
+        $req_id = intval($_POST['request_id']);
+        $w = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table_avail WHERE id=%d", $req_id));
         
-        if ($_POST['paguro_action'] === 'confirm_booking') {
-            $wpdb->update($table_avail, ['status' => 1], ['id' => $req_id]);
-            $losers = $wpdb->get_results($wpdb->prepare("SELECT id FROM $table_avail WHERE apartment_id=%d AND id!=%d AND status!=1 AND (date_start<%s AND date_end>%s)", $w->apartment_id, $req_id, $w->date_end, $w->date_start));
-            foreach ($losers as $l) $wpdb->delete($table_avail, ['id' => $l->id]);
-            $subj = paguro_parse_template(get_option('paguro_txt_email_confirm_subj'), $ph); 
-            $body = paguro_parse_template(get_option('paguro_txt_email_confirm_body'), $ph);
-            if ($w->guest_email) paguro_send_html_email($w->guest_email, $subj, $body);
-            paguro_add_history($req_id, 'ADMIN_CONFIRM', 'Confermata da Admin');
-            echo '<div class="notice notice-success"><p>Confermata.</p></div>';
+        if ($_POST['paguro_action'] === 'anonymize_admin') {
+            $cleaned_log = json_encode([['time'=>current_time('mysql'), 'action'=>'GDPR_WIPE', 'details'=>'Data wiped by Admin']]);
+            $wpdb->update($table_avail, ['guest_name'=>'Anonimo (Admin)','guest_email'=>'deleted@admin.act','guest_phone'=>'0000','guest_notes'=>'', 'history_log'=>$cleaned_log], ['id'=>$req_id]);
+            echo '<div class="notice notice-success"><p>Anonimizzato.</p></div>';
         }
-        if ($_POST['paguro_action'] === 'resend_email') {
-            if ($w->guest_email) {
-                $subj = paguro_parse_template(get_option('paguro_txt_email_request_subj'), $ph); $body = paguro_parse_template(get_option('paguro_txt_email_request_body'), $ph);
-                paguro_send_html_email($w->guest_email, $subj, $body); paguro_add_history($req_id, 'ADMIN_RESEND_REQ', 'Reinviata mail richiesta'); echo '<div class="notice notice-success"><p>Mail reinviata.</p></div>';
+
+        if ($w) {
+            $apt_row = $wpdb->get_row($wpdb->prepare("SELECT name, pricing_json, base_price FROM $table_apt WHERE id=%d", $w->apartment_id));
+            $tot = paguro_calculate_quote($w->apartment_id, $w->date_start, $w->date_end);
+            $dep_percent = intval(get_option('paguro_deposit_percent', 30)) / 100;
+            $dep = ceil($tot * $dep_percent);
+            $competitors = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table_avail WHERE apartment_id=%d AND status=2 AND receipt_url IS NULL AND id!=%d AND (date_start < %s AND date_end > %s)", $w->apartment_id, $w->id, $w->date_end, $w->date_start));
+
+            $ph = [
+                'guest_name' => $w->guest_name, 'date_start' => date('d/m/Y',strtotime($w->date_start)), 'date_end' => date('d/m/Y',strtotime($w->date_end)), 
+                'apt_name' => ucfirst($apt_row->name ?? ''), 'link_riepilogo' => site_url("/".get_option('paguro_page_slug')."/?token={$w->lock_token}"),
+                'total_cost' => $tot, 'deposit_cost' => $dep, 'count' => $competitors, 'receipt_url' => $w->receipt_url ?? '#',
+                'id' => $w->id, 'guest_phone' => $w->guest_phone
+            ];
+            
+            if ($_POST['paguro_action'] === 'confirm_booking') {
+                $wpdb->update($table_avail, ['status' => 1], ['id' => $req_id]);
+                $losers = $wpdb->get_results($wpdb->prepare("SELECT id FROM $table_avail WHERE apartment_id=%d AND id!=%d AND status!=1 AND (date_start<%s AND date_end>%s)", $w->apartment_id, $req_id, $w->date_end, $w->date_start));
+                foreach ($losers as $l) $wpdb->delete($table_avail, ['id' => $l->id]);
+                $subj = paguro_parse_template(get_option('paguro_txt_email_confirm_subj'), $ph); 
+                $body = paguro_parse_template(get_option('paguro_txt_email_confirm_body'), $ph);
+                if ($w->guest_email) paguro_send_html_email($w->guest_email, $subj, $body);
+                paguro_add_history($req_id, 'ADMIN_CONFIRM', 'Confermata da Admin');
+                echo '<div class="notice notice-success"><p>Confermata.</p></div>';
             }
-        }
-        if ($_POST['paguro_action'] === 'resend_receipt_ack') {
-            if ($w->guest_email) {
-                $subj = paguro_parse_template(get_option('paguro_txt_email_receipt_subj'), $ph); $body = paguro_parse_template(get_option('paguro_txt_email_receipt_body'), $ph);
-                paguro_send_html_email($w->guest_email, $subj, $body); paguro_add_history($req_id, 'ADMIN_RESEND_ACK', 'Reinviata mail distinta'); echo '<div class="notice notice-success"><p>Mail reinviata.</p></div>';
+            if ($_POST['paguro_action'] === 'resend_email') {
+                if ($w->guest_email) {
+                    $subj = paguro_parse_template(get_option('paguro_txt_email_request_subj'), $ph); $body = paguro_parse_template(get_option('paguro_txt_email_request_body'), $ph);
+                    paguro_send_html_email($w->guest_email, $subj, $body); paguro_add_history($req_id, 'ADMIN_RESEND_REQ', 'Reinviata mail richiesta'); echo '<div class="notice notice-success"><p>Mail reinviata.</p></div>';
+                }
             }
-        }
-        if ($_POST['paguro_action'] === 'notify_refund_user') {
-            if ($w->guest_email) {
-                $subj = paguro_parse_template(get_option('paguro_txt_email_refund_ok_subj'), $ph); $body = paguro_parse_template(get_option('paguro_txt_email_refund_ok_body'), $ph);
-                paguro_send_html_email($w->guest_email, $subj, $body); paguro_add_history($req_id, 'ADMIN_NOTIFY_REFUND', 'Notificato Rimborso al cliente'); echo '<div class="notice notice-success"><p>Notifica Rimborso Inviata!</p></div>';
+            if ($_POST['paguro_action'] === 'resend_confirmation') {
+                if ($w->guest_email) {
+                    $subj = paguro_parse_template(get_option('paguro_txt_email_confirm_subj'), $ph); $body = paguro_parse_template(get_option('paguro_txt_email_confirm_body'), $ph);
+                    paguro_send_html_email($w->guest_email, $subj, $body); paguro_add_history($req_id, 'ADMIN_RESEND_CONF', 'Reinviata Conferma'); echo '<div class="notice notice-success"><p>Conferma reinviata.</p></div>';
+                }
             }
+            if ($_POST['paguro_action'] === 'resend_receipt_ack') {
+                if ($w->guest_email) {
+                    $subj = paguro_parse_template(get_option('paguro_txt_email_receipt_subj'), $ph); $body = paguro_parse_template(get_option('paguro_txt_email_receipt_body'), $ph);
+                    paguro_send_html_email($w->guest_email, $subj, $body); paguro_add_history($req_id, 'ADMIN_RESEND_ACK', 'Reinviata mail distinta'); echo '<div class="notice notice-success"><p>Mail reinviata.</p></div>';
+                }
+            }
+            if ($_POST['paguro_action'] === 'notify_refund_user') {
+                if ($w->guest_email) {
+                    $subj = paguro_parse_template(get_option('paguro_txt_email_refund_ok_subj'), $ph); $body = paguro_parse_template(get_option('paguro_txt_email_refund_ok_body'), $ph);
+                    paguro_send_html_email($w->guest_email, $subj, $body); paguro_add_history($req_id, 'ADMIN_NOTIFY_REFUND', 'Notificato Rimborso al cliente'); echo '<div class="notice notice-success"><p>Notifica Rimborso Inviata!</p></div>';
+                }
+            }
+            if ($_POST['paguro_action'] === 'delete_row') { $wpdb->delete($table_avail, ['id' => $req_id]); echo '<div class="notice notice-success"><p>Eliminata.</p></div>'; }
         }
-        if ($_POST['paguro_action'] === 'delete_row') { $wpdb->delete($table_avail, ['id' => $req_id]); echo '<div class="notice notice-success"><p>Eliminata.</p></div>'; }
     }
 }
 
+// --- FUNZIONE RENDER TIMELINE ---
 function paguro_render_timeline() {
     global $wpdb; 
     $s_start = new DateTime(get_option('paguro_season_start', '2026-06-01')); 
@@ -139,7 +197,17 @@ function paguro_render_timeline() {
     $apts = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}paguro_apartments");
     $bookings = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}paguro_availability WHERE status IN (1,2)");
     $occupancy = []; foreach($bookings as $b) { $curr = new DateTime($b->date_start); $end = new DateTime($b->date_end); while($curr < $end) { $occupancy[$b->apartment_id][$curr->format('Y-m-d')] = ['status' => $b->status, 'name' => $b->guest_name]; $curr->modify('+1 day'); } }
-    $day_map = ['Mon'=>'Lun','Tue'=>'Mar','Wed'=>'Mer','Thu'=>'Gio','Fri'=>'Ven','Sat'=>'Sab','Sun'=>'Dom']; $month_map = ['06'=>'Giugno','07'=>'Luglio','08'=>'Agosto','09'=>'Settembre', '10'=>'Ottobre', '05'=>'Maggio'];
+    
+    $day_map = ['Mon'=>'Lun','Tue'=>'Mar','Wed'=>'Mer','Thu'=>'Gio','Fri'=>'Ven','Sat'=>'Sab','Sun'=>'Dom']; 
+    $month_map = ['01'=>'Gennaio', '02'=>'Febbraio', '03'=>'Marzo', '04'=>'Aprile', '05'=>'Maggio', '06'=>'Giugno','07'=>'Luglio','08'=>'Agosto','09'=>'Settembre', '10'=>'Ottobre', '11'=>'Novembre', '12'=>'Dicembre'];
+    
+    // Colori pastello per i mesi
+    $month_colors = [
+        '01' => '#ffebee', '02' => '#f3e5f5', '03' => '#e8eaf6', '04' => '#e3f2fd',
+        '05' => '#e0f2f1', '06' => '#e8f5e9', '07' => '#fffde7', '08' => '#fff3e0',
+        '09' => '#fbe9e7', '10' => '#efebe9', '11' => '#eceff1', '12' => '#fafafa'
+    ];
+
     echo '<div style="overflow-x:auto; background:#fff; padding:10px; border:1px solid #ccc; margin-bottom:20px;">';
     echo '<table style="border-collapse:collapse; width:100%; min-width:1200px; font-size:10px;">';
     echo '<tr><td style="width:100px; border:none;"></td>';
@@ -149,7 +217,11 @@ function paguro_render_timeline() {
         if ($temp->format('d') != '01') { $days_in_month = (int)$days_in_month - (int)$temp->format('d') + 1; }
         $month_end = clone $temp; $month_end->modify('last day of this month');
         if ($month_end > $s_end) { $diff = $temp->diff($s_end); $days_in_month = $diff->days + 1; }
-        echo "<td colspan='{$days_in_month}' style='border:1px solid #999; text-align:center; background:#eee; font-weight:bold; font-size:12px;'>".($month_map[$m]??$m)."</td>"; $temp->modify('first day of next month'); 
+        
+        $bg_color = isset($month_colors[$m]) ? $month_colors[$m] : '#eee';
+        
+        echo "<td colspan='{$days_in_month}' style='border:1px solid #999; text-align:center; background:{$bg_color}; font-weight:bold; font-size:12px;'>".($month_map[$m]??$m)."</td>"; 
+        $temp->modify('first day of next month'); 
     }
     echo '</tr><tr><td style="width:100px;"><strong>Appartamento</strong></td>';
     $p = new DatePeriod($s_start, new DateInterval('P1D'), $s_end->modify('+1 day'));
@@ -159,7 +231,10 @@ function paguro_render_timeline() {
         echo "<tr><td style='border:1px solid #ddd; padding:5px; border-right:2px solid #999;'><strong>".esc_html($apt->name)."</strong></td>";
         foreach($p as $dt) {
             $ymd = $dt->format('Y-m-d'); $cell_data = isset($occupancy[$apt->id][$ymd]) ? $occupancy[$apt->id][$ymd] : null; $style = ''; $title = '';
-            if ($cell_data) { if ($cell_data['status'] == 1) { $style = "background:#dc3545;"; $title="Occ: ".$cell_data['name']; } elseif ($cell_data['status'] == 2) { $style = "background:#ffc107;"; $title="Pend: ".$cell_data['name']; } }
+            if ($cell_data) { 
+                if ($cell_data['status'] == 1) { $style = "background:#dc3545;"; $title="Occ: ".$cell_data['name']; } 
+                elseif ($cell_data['status'] == 2) { $style = "background:#ffc107;"; $title="Pend: ".$cell_data['name']; } 
+            }
             echo "<td style='border:1px solid #eee; border-right:1px solid #ddd; $style' title='".esc_attr($title)."'></td>";
         }
         echo "</tr>";
@@ -473,11 +548,60 @@ function paguro_render_timeline() {
 
     <?php else: ?>
         <?php paguro_render_timeline(); ?>
+        
+        <div style="margin-bottom:20px; border:1px solid #ccd0d4; background:#fff; border-radius:4px;">
+            <details>
+                <summary style="padding:10px; cursor:pointer; background:#f9f9f9; font-weight:600;">➕ Aggiungi Prenotazione Manuale (Bypass Vincoli)</summary>
+                <div style="padding:15px; border-top:1px solid #eee;">
+                    <form method="post" style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:15px;">
+                        <?php wp_nonce_field('paguro_admin_action','paguro_nonce'); ?>
+                        <input type="hidden" name="paguro_action" value="manual_add_booking">
+                        
+                        <div>
+                            <label>Appartamento</label>
+                            <select name="m_apt_id" required style="width:100%;">
+                                <?php $all_apts = $wpdb->get_results("SELECT * FROM $table_apt"); foreach($all_apts as $a): ?>
+                                    <option value="<?php echo $a->id; ?>"><?php echo esc_html($a->name); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div><label>Arrivo</label><input type="date" name="m_start" required style="width:100%;"></div>
+                        <div><label>Partenza</label><input type="date" name="m_end" required style="width:100%;"></div>
+                        
+                        <div><label>Nome Ospite</label><input type="text" name="m_name" placeholder="Mario Rossi" required style="width:100%;"></div>
+                        <div><label>Email (Opzionale)</label><input type="email" name="m_email" placeholder="cliente@email.it" style="width:100%;"></div>
+                        <div><label>Telefono</label><input type="text" name="m_phone" placeholder="+39..." style="width:100%;"></div>
+                        
+                        <div style="grid-column: span 3;">
+                            <label>Note Interne</label>
+                            <textarea name="m_notes" style="width:100%; height:50px;" placeholder="Prenotazione inserita manualmente da admin..."></textarea>
+                        </div>
+                        
+                        <div style="grid-column: span 3;">
+                            <button type="submit" class="button button-primary">Inserisci Prenotazione (Stato: Confermato)</button>
+                            <span style="font-size:11px; color:#666; margin-left:10px;">⚠️ Le date non devono seguire la regola Sabato-Sabato. La prenotazione sarà creata come "Confermata".</span>
+                        </div>
+                    </form>
+                </div>
+            </details>
+        </div>
         <?php $rows = $wpdb->get_results("SELECT av.*, apt.name as apt_name FROM $table_avail av JOIN $table_apt apt ON av.apartment_id = apt.id ORDER BY av.created_at DESC"); ?>
         <table class="wp-list-table widefat fixed striped table-view-list">
-            <thead><tr><th style="width:100px;">Stato</th><th>Date</th><th>Ospite</th><th>Note</th><th>Storico</th><th>Azione</th></tr></thead>
+            <thead>
+                <tr>
+                    <th style="width:100px;">Stato</th>
+                    <th>Date</th>
+                    <th>Appartamento</th>
+                    <th>Ospite</th>
+                    <th>Acconto</th>
+                    <th>Saldo</th>
+                    <th>Note</th>
+                    <th>Storico</th>
+                    <th>Azione</th>
+                </tr>
+            </thead>
             <tbody>
-                <?php if(empty($rows)):?><tr><td colspan="6">Nessuna prenotazione.</td></tr><?php else: foreach($rows as $r): 
+                <?php if(empty($rows)):?><tr><td colspan="9">Nessuna prenotazione.</td></tr><?php else: foreach($rows as $r): 
                     $st_lbl = ($r->status==1) ? 'OK' : (($r->status==3)?'CANC':'Pend');
                     $st_col = ($r->status==1) ? 'green' : (($r->status==3)?'red':'orange');
                     $st = '<span style="color:'.$st_col.';font-weight:bold">'.$st_lbl.'</span>';
@@ -487,11 +611,20 @@ function paguro_render_timeline() {
                     
                     $rc_icon = ($r->receipt_url)?' <a href="'.esc_url($r->receipt_url).'" target="_blank" title="Vedi Distinta">📄</a>':''; 
                     $dt_req = date('d/m H:i', strtotime($r->created_at)); $hist_json = htmlspecialchars($r->history_log, ENT_QUOTES, 'UTF-8');
+                    
+                    // Calcolo Prezzi al volo
+                    $tot = paguro_calculate_quote($r->apartment_id, $r->date_start, $r->date_end);
+                    $dep_percent = intval(get_option('paguro_deposit_percent', 30)) / 100;
+                    $dep = ceil($tot * $dep_percent);
+                    $saldo = $tot - $dep;
                 ?>
                 <tr>
                     <td><?php echo $st.$rc_icon; ?></td>
                     <td style="font-size:12px;"><?php echo $dt_req; ?><br><small><?php echo date('d/m',strtotime($r->date_start)).' -> '.date('d/m',strtotime($r->date_end)); ?></small></td>
+                    <td><strong><?php echo esc_html($r->apt_name); ?></strong></td>
                     <td><strong><?php echo esc_html($r->guest_name); ?></strong><br><small><?php echo esc_html($r->guest_email); ?></small></td>
+                    <td>€ <?php echo $dep; ?></td>
+                    <td>€ <?php echo $saldo; ?> <small style="color:#666;">(Tot: <?php echo $tot; ?>)</small></td>
                     <td style="max-width:200px; font-size:11px;"><em><?php echo nl2br(esc_html($r->guest_notes)); ?></em></td>
                     <td><button class="button button-small" onclick="openHistory(<?php echo $r->id; ?>, '<?php echo $hist_json; ?>')">📜</button></td>
                     <td>
@@ -510,6 +643,7 @@ function paguro_render_timeline() {
                             <?php endif; ?>
 
                             <button type="submit" name="paguro_action" value="delete_row" class="button button-small" style="color:#a00;" onclick="return confirm('Eliminare?')">❌</button>
+                            <button type="submit" name="paguro_action" value="anonymize_admin" class="button button-small" onclick="return confirm('Sei sicuro? I dati personali saranno cancellati (GDPR).')" style="background:#555; color:#fff;" title="GDPR Wipe">🕵️ Anon</button>
                         </form>
                     </td>
                 </tr>
