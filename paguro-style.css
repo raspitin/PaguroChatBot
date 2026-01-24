@@ -1,0 +1,153 @@
+/* STILE BOT PAGURO */
+.paguro-chat-launcher {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 60px;
+    height: 60px;
+    background: #ffffff;
+    border-radius: 50%;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    cursor: pointer;
+    z-index: 999999; /* Altissimo per stare sopra a tutto */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.3s ease;
+}
+
+.paguro-chat-launcher:hover {
+    transform: scale(1.1);
+}
+
+.paguro-chat-launcher img {
+    width: 40px;
+    height: auto;
+}
+
+/* WIDGET CHAT (Finestra) */
+.paguro-chat-widget {
+    position: fixed;
+    bottom: 90px;
+    right: 20px;
+    width: 350px;
+    max-width: 90%;
+    height: 500px;
+    max-height: 80vh;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+    z-index: 999999;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    font-family: sans-serif;
+    display: none; /* Nascosto di default, gestito da JS */
+}
+
+/* HEADER */
+.paguro-chat-header {
+    background: #0073aa;
+    color: #fff;
+    padding: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: bold;
+}
+
+/* BODY */
+.paguro-chat-body {
+    flex: 1;
+    padding: 15px;
+    overflow-y: auto;
+    background: #f9f9f9;
+}
+
+/* MESSAGGI */
+.paguro-msg {
+    margin-bottom: 10px;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.paguro-msg-content {
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.4;
+    max-width: 80%;
+    word-wrap: break-word;
+}
+
+.paguro-msg-user {
+    flex-direction: row-reverse;
+}
+.paguro-msg-user .paguro-msg-content {
+    background: #0073aa;
+    color: #fff;
+    border-bottom-right-radius: 2px;
+}
+
+.paguro-msg-bot .paguro-msg-content {
+    background: #e5e5ea;
+    color: #000;
+    border-bottom-left-radius: 2px;
+}
+
+.paguro-bot-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+}
+
+/* FOOTER INPUT */
+.paguro-chat-footer {
+    padding: 10px;
+    border-top: 1px solid #eee;
+    background: #fff;
+    display: flex;
+    gap: 10px;
+}
+
+.paguro-chat-footer input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 20px;
+    outline: none;
+}
+
+.paguro-chat-footer button {
+    background: #0073aa;
+    color: #fff;
+    border: none;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+/* LINK PRENOTA */
+.paguro-book-btn {
+    display: inline-block;
+    margin-top: 5px;
+    padding: 4px 8px;
+    background: #28a745;
+    color: white !important;
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+}
+.paguro-book-btn:hover {
+    background: #218838;
+}
+
+/* Loading dots */
+.paguro-typing {
+    animation: blink 1s infinite;
+}
+@keyframes blink { 50% { opacity: 0.5; } }
