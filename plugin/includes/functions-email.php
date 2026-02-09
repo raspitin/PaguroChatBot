@@ -13,8 +13,11 @@ if (!defined('ABSPATH')) exit;
 function paguro_build_email_html($content, $subject = 'Villa Celi', $is_admin = false) {
     if (!$is_admin) {
         $privacy_txt = get_option('paguro_msg_ui_privacy_notice', '');
-        $content .= $privacy_txt;
+        if (!empty($privacy_txt)) {
+            $content .= "\n\n" . $privacy_txt;
+        }
     }
+    $content = nl2br($content);
     
     $html = '<!DOCTYPE html>
 <html>
@@ -186,6 +189,82 @@ function paguro_escape_user_placeholders($placeholders) {
     return $safe;
 }
 
+function paguro_build_group_weeks_html($weeks) {
+    if (!$weeks) return '';
+    $html = '<ul>';
+    foreach ($weeks as $w) {
+        $label = date('d/m/Y', strtotime($w['date_start'])) . ' - ' . date('d/m/Y', strtotime($w['date_end']));
+        $price = isset($w['price']) ? number_format($w['price'], 2, ',', '.') : '';
+        $html .= '<li>' . esc_html($label) . ($price !== '' ? ' (€' . esc_html($price) . ')' : '') . '</li>';
+    }
+    $html .= '</ul>';
+    return $html;
+}
+
+function paguro_get_group_email_placeholders($group_id) {
+    if (!function_exists('paguro_get_group_bookings_with_apartment')) return [];
+    $bookings = paguro_get_group_bookings_with_apartment($group_id);
+    if (!$bookings) return [];
+    $active = [];
+    foreach ($bookings as $b) {
+        if (intval($b->status) !== 3) {
+            $active[] = $b;
+        }
+    }
+    if (!$active) return [];
+    $first = $active[0];
+    $totals = function_exists('paguro_calculate_group_totals') ? paguro_calculate_group_totals($group_id, $bookings) : [
+        'weeks' => [],
+        'weeks_count' => 0,
+        'total_raw' => 0,
+        'discount' => 0,
+        'total_final' => 0,
+        'deposit' => 0,
+        'remaining' => 0
+    ];
+    $weeks_list = paguro_build_group_weeks_html($totals['weeks']);
+    $deposit_percent = intval(get_option('paguro_deposit_percent', 30));
+    $page_slug = get_option('paguro_page_slug', 'riepilogo-prenotazione');
+    $link_riepilogo = site_url("/{$page_slug}/?token={$group_id}");
+    $booking_url = site_url("/" . get_option('paguro_checkout_slug', 'prenotazione') . "/");
+
+    $date_start = $active[0]->date_start;
+    $date_end = $active[count($active) - 1]->date_end;
+
+    return [
+        'guest_name' => $first->guest_name,
+        'guest_email' => $first->guest_email,
+        'guest_phone' => $first->guest_phone,
+        'apt_name' => ucfirst($first->apt_name),
+        'apt_name_raw' => $first->apt_name,
+        'date_start' => date('d/m/Y', strtotime($date_start)),
+        'date_end' => date('d/m/Y', strtotime($date_end)),
+        'date_start_raw' => $date_start,
+        'date_end_raw' => $date_end,
+        'weeks_list' => $weeks_list,
+        'weeks_count' => $totals['weeks_count'],
+        'total_raw' => $totals['total_raw'],
+        'total_raw_fmt' => number_format($totals['total_raw'], 2, ',', '.'),
+        'discount_amount' => $totals['discount'],
+        'discount_amount_fmt' => number_format($totals['discount'], 2, ',', '.'),
+        'total_cost_raw' => $totals['total_final'],
+        'total_cost' => number_format($totals['total_final'], 2, ',', '.'),
+        'total_cost_fmt' => number_format($totals['total_final'], 2, ',', '.'),
+        'deposit_cost_raw' => $totals['deposit'],
+        'deposit_cost' => number_format($totals['deposit'], 2, ',', '.'),
+        'deposit_cost_fmt' => number_format($totals['deposit'], 2, ',', '.'),
+        'remaining_cost_raw' => $totals['remaining'],
+        'remaining_cost' => number_format($totals['remaining'], 2, ',', '.'),
+        'remaining_cost_fmt' => number_format($totals['remaining'], 2, ',', '.'),
+        'deposit_percent' => $deposit_percent,
+        'iban' => get_option('paguro_bank_iban'),
+        'intestatario' => get_option('paguro_bank_owner'),
+        'link_riepilogo' => $link_riepilogo,
+        'booking_url' => $booking_url,
+        'admin_email' => get_option('admin_email')
+    ];
+}
+
 function paguro_get_admin_receipt_link($booking_id, $receipt_url = '') {
     $booking_id = intval($booking_id);
     if ($booking_id <= 0 || $receipt_url === '') {
@@ -217,6 +296,9 @@ function paguro_send_quote_request_to_user($booking_id) {
     ));
     
     if (!$b || !is_email($b->guest_email)) return false;
+    if (!empty($b->group_id) && function_exists('paguro_send_group_quote_request_to_user')) {
+        return paguro_send_group_quote_request_to_user($b->group_id);
+    }
     
     $placeholders = paguro_get_email_placeholders($b);
     
@@ -258,6 +340,9 @@ function paguro_send_quote_request_to_admin($booking_id) {
     ));
     
     if (!$b) return false;
+    if (!empty($b->group_id) && function_exists('paguro_send_group_quote_request_to_admin')) {
+        return paguro_send_group_quote_request_to_admin($b->group_id);
+    }
     
     $admin_email = get_option('admin_email');
     
@@ -294,6 +379,9 @@ function paguro_send_receipt_received_to_user($booking_id) {
     ));
     
     if (!$b || !is_email($b->guest_email)) return false;
+    if (!empty($b->group_id) && function_exists('paguro_send_group_receipt_received_to_user')) {
+        return paguro_send_group_receipt_received_to_user($b->group_id);
+    }
     
     $placeholders = paguro_escape_user_placeholders(paguro_get_email_placeholders($b));
     
@@ -328,6 +416,9 @@ function paguro_send_receipt_received_to_admin($booking_id) {
     ));
     
     if (!$b) return false;
+    if (!empty($b->group_id) && function_exists('paguro_send_group_receipt_received_to_admin')) {
+        return paguro_send_group_receipt_received_to_admin($b->group_id);
+    }
     
     $admin_email = get_option('admin_email');
     
@@ -370,6 +461,9 @@ function paguro_send_booking_confirmed_to_user($booking_id) {
     ));
     
     if (!$b || !is_email($b->guest_email)) return false;
+    if (!empty($b->group_id) && function_exists('paguro_send_group_booking_confirmed_to_user')) {
+        return paguro_send_group_booking_confirmed_to_user($b->group_id);
+    }
     
     $placeholders = paguro_escape_user_placeholders(paguro_get_email_placeholders($b));
     
@@ -404,6 +498,9 @@ function paguro_send_booking_confirmed_to_admin($booking_id) {
     ));
     
     if (!$b) return false;
+    if (!empty($b->group_id) && function_exists('paguro_send_group_booking_confirmed_to_admin')) {
+        return paguro_send_group_booking_confirmed_to_admin($b->group_id);
+    }
     
     $admin_email = get_option('admin_email');
     $placeholders = paguro_escape_user_placeholders(paguro_get_email_placeholders($b));
@@ -534,6 +631,167 @@ function paguro_send_cancel_request_to_admin($booking_id) {
 }
 
 // =========================================================
+// GROUP: BOOKING CONFIRMED
+// =========================================================
+
+function paguro_send_group_booking_confirmed_to_user($group_id) {
+    if (!function_exists('paguro_get_group_bookings')) return false;
+    $bookings = paguro_get_group_bookings($group_id);
+    if (!$bookings) return false;
+    foreach ($bookings as $b) {
+        if (intval($b->status) !== 1) {
+            return false;
+        }
+    }
+    $placeholders = paguro_get_group_email_placeholders($group_id);
+    if (empty($placeholders) || !is_email($placeholders['guest_email'] ?? '')) return false;
+    $placeholders = paguro_escape_user_placeholders($placeholders);
+
+    $subject = paguro_parse_template(
+        get_option('paguro_txt_email_confirm_subj', 'Prenotazione Confermata: {apt_name}'),
+        $placeholders
+    );
+    $template = get_option('paguro_txt_email_confirm_body',
+        'Ciao {guest_name},<br><br>La tua prenotazione per {apt_name} è confermata!<br>' .
+        'Settimane: {weeks_list}<br>' .
+        'Importo totale: €{total_cost}<br>Acconto: €{deposit_cost}'
+    );
+    if (stripos($template, '{weeks_list}') === false) {
+        $template .= '<br><br><strong>Settimane:</strong><br>{weeks_list}';
+    }
+    $body = paguro_parse_template($template, $placeholders);
+    return paguro_send_email($placeholders['guest_email'], $subject, $body, false);
+}
+
+function paguro_send_group_booking_confirmed_to_admin($group_id) {
+    if (!function_exists('paguro_get_group_bookings')) return false;
+    $bookings = paguro_get_group_bookings($group_id);
+    if (!$bookings) return false;
+    foreach ($bookings as $b) {
+        if (intval($b->status) !== 1) {
+            return false;
+        }
+    }
+    $placeholders = paguro_get_group_email_placeholders($group_id);
+    if (empty($placeholders)) return false;
+    $placeholders = paguro_escape_user_placeholders($placeholders);
+    $admin_email = get_option('admin_email');
+    $subject = paguro_parse_template(
+        get_option('paguro_msg_email_adm_wait_subj', 'Prenotazione Confermata: {apt_name}'),
+        $placeholders
+    );
+    $template = get_option('paguro_msg_email_adm_wait_body',
+        'Prenotazione confermata per {guest_name} - {apt_name} (€{total_cost})'
+    );
+    if (stripos($template, '{weeks_list}') === false) {
+        $template .= '<br><br><strong>Settimane:</strong><br>{weeks_list}';
+    }
+    $body = paguro_parse_template($template, $placeholders);
+    return paguro_send_email($admin_email, $subject, $body, true);
+}
+
+// =========================================================
+// GROUP: RECEIPT UPLOADED
+// =========================================================
+
+function paguro_send_group_receipt_received_to_user($group_id) {
+    $placeholders = paguro_get_group_email_placeholders($group_id);
+    if (empty($placeholders) || !is_email($placeholders['guest_email'] ?? '')) return false;
+    $placeholders = paguro_escape_user_placeholders($placeholders);
+
+    $subject = paguro_parse_template(
+        get_option('paguro_txt_email_receipt_subj', 'Distinta Ricevuta - {apt_name}'),
+        $placeholders
+    );
+
+    $template = get_option('paguro_txt_email_receipt_body',
+        'Ciao {guest_name},<br><br>Abbiamo ricevuto la tua distinta del bonifico per {apt_name}.<br>' .
+        'Stiamo validando il pagamento. Ti contatteremo entro 24 ore.'
+    );
+    if (stripos($template, '{weeks_list}') === false) {
+        $template .= '<br><br><strong>Settimane:</strong><br>{weeks_list}';
+    }
+    $body = paguro_parse_template($template, $placeholders);
+    return paguro_send_email($placeholders['guest_email'], $subject, $body, false);
+}
+
+function paguro_send_group_receipt_received_to_admin($group_id) {
+    $placeholders = paguro_get_group_email_placeholders($group_id);
+    if (empty($placeholders)) return false;
+    $placeholders = paguro_escape_user_placeholders($placeholders);
+
+    $admin_email = get_option('admin_email');
+    $placeholders['admin_link'] = admin_url('admin.php?page=paguro-booking&tab=bookings');
+    $subject = paguro_parse_template(
+        get_option('paguro_msg_email_adm_receipt_subj', 'Distinta Caricata: {apt_name}'),
+        $placeholders
+    );
+    $template = get_option('paguro_msg_email_adm_receipt_body',
+        'Distinta ricevuta da {guest_name} ({guest_email}) per {apt_name}.<br>' .
+        'Apri il pannello admin per validare: <a href="{admin_link}">Vai alle prenotazioni</a>.'
+    );
+    if (stripos($template, '{weeks_list}') === false) {
+        $template .= '<br><br><strong>Settimane:</strong><br>{weeks_list}';
+    }
+    $body = paguro_parse_template($template, $placeholders);
+    return paguro_send_email($admin_email, $subject, $body, true);
+}
+
+// =========================================================
+// GROUP: QUOTE SUBMITTED
+// =========================================================
+
+function paguro_send_group_quote_request_to_user($group_id) {
+    $placeholders = paguro_get_group_email_placeholders($group_id);
+    if (empty($placeholders) || !is_email($placeholders['guest_email'] ?? '')) return false;
+    $placeholders = paguro_escape_user_placeholders($placeholders);
+
+    $subject = paguro_parse_template(
+        get_option('paguro_txt_email_request_subj', 'Conferma Richiesta Preventivo: {apt_name}'),
+        $placeholders
+    );
+
+    $template = get_option('paguro_txt_email_request_body',
+        'Ciao {guest_name},<br><br>Abbiamo ricevuto la tua richiesta per {apt_name}.<br>' .
+        'Per procedere con la conferma e visualizzare i dati per il bonifico, accedi alla tua area riservata:<br>' .
+        '<a href="{link_riepilogo}" class="button">VAI ALLA TUA PRENOTAZIONE</a>'
+    );
+
+    if (stripos($template, '{weeks_list}') === false) {
+        $template .= '<br><br><strong>Settimane selezionate:</strong><br>{weeks_list}';
+    }
+    if (stripos($template, '{discount_amount') === false && ($placeholders['discount_amount'] ?? 0) > 0) {
+        $template .= '<br>Sconto multi‑settimana: €{discount_amount_fmt}';
+    }
+    if (stripos($template, '{total_cost') === false) {
+        $template .= '<br>Totale finale: €{total_cost_fmt}';
+    }
+
+    $body = paguro_parse_template($template, $placeholders);
+    return paguro_send_email($placeholders['guest_email'], $subject, $body, false);
+}
+
+function paguro_send_group_quote_request_to_admin($group_id) {
+    $placeholders = paguro_get_group_email_placeholders($group_id);
+    if (empty($placeholders)) return false;
+    $placeholders = paguro_escape_user_placeholders($placeholders);
+
+    $admin_email = get_option('admin_email');
+    $subject = paguro_parse_template(
+        get_option('paguro_msg_email_adm_new_req_subj', 'Nuovo Preventivo: {apt_name}'),
+        $placeholders
+    );
+    $template = get_option('paguro_msg_email_adm_new_req_body',
+        'Nuovo preventivo richiesto da {guest_name} ({guest_email}) per {apt_name}.'
+    );
+    if (stripos($template, '{weeks_list}') === false) {
+        $template .= '<br><br><strong>Settimane:</strong><br>{weeks_list}';
+    }
+    $body = paguro_parse_template($template, $placeholders);
+    return paguro_send_email($admin_email, $subject, $body, true);
+}
+
+// =========================================================
 // 10. CANCEL CONFIRMED - USER
 // =========================================================
 
@@ -628,7 +886,6 @@ function paguro_send_cancellation_to_admin($booking_id) {
     ));
     
     if (!$b) return false;
-    
     $admin_email = get_option('admin_email');
     
     $placeholders = paguro_escape_user_placeholders(paguro_get_email_placeholders($b));
@@ -735,7 +992,6 @@ function paguro_send_waitlist_confirmation_to_admin($booking_id) {
     ));
     
     if (!$b) return false;
-    
     $admin_email = get_option('admin_email');
     
     $placeholders = paguro_escape_user_placeholders(paguro_get_email_placeholders($b));

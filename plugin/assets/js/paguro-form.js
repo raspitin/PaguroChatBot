@@ -46,6 +46,172 @@ jQuery(document).ready(function($) {
     }
 
     // =========================================================
+    // MULTI-WEEK SELECTION (CHAT)
+    // =========================================================
+
+    var multiState = {
+        apt: null,
+        selections: []
+    };
+
+    function selectionKey(item) {
+        return item.in + '|' + item.out;
+    }
+
+    function normalizeSelectionList() {
+        var seen = {};
+        var out = [];
+        multiState.selections.forEach(function(item) {
+            var key = selectionKey(item);
+            if (seen[key]) return;
+            seen[key] = true;
+            out.push(item);
+        });
+        multiState.selections = out;
+    }
+
+    function getPanelFromElement(el) {
+        return $(el).closest('.paguro-chat-window, .paguro-chat-root').find('.paguro-multi-panel').last();
+    }
+
+    function updateMultiPanel(panel) {
+        if (!panel || panel.length === 0) return;
+        normalizeSelectionList();
+        var list = panel.find('.paguro-multi-selected');
+        if (multiState.selections.length === 0) {
+            list.text('Nessuna settimana selezionata.');
+            panel.find('.paguro-multi-confirm').addClass('is-disabled');
+            return;
+        }
+        var html = '<ul>';
+        multiState.selections.forEach(function(item) {
+            html += '<li>' + item.in + ' - ' + item.out + '</li>';
+        });
+        html += '</ul>';
+        list.html(html);
+        panel.find('.paguro-multi-confirm').removeClass('is-disabled');
+    }
+
+    function appendBotMsg(chatBody, html) {
+        var safeHtml = (typeof html === 'string') ? html : '';
+        chatBody.append(
+            '<div class="paguro-msg paguro-msg-bot">' +
+            '<img src="' + data.icon_url + '" class="paguro-bot-avatar" alt="Paguro">' +
+            '<div class="paguro-msg-content">' + safeHtml + '</div>' +
+            '</div>'
+        );
+        chatBody.scrollTop(chatBody[0].scrollHeight);
+    }
+
+    function clearSelections(panel) {
+        multiState.selections = [];
+        multiState.apt = null;
+        $('.paguro-week-toggle.is-selected').removeClass('is-selected').text('[Seleziona]');
+        updateMultiPanel(panel);
+    }
+
+    $(document).on('click', '.paguro-week-toggle', function(e) {
+        e.preventDefault();
+        var btn = $(this);
+        var apt = btn.data('apt');
+        var dateIn = btn.data('in');
+        var dateOut = btn.data('out');
+        if (!apt || !dateIn || !dateOut) return;
+
+        var panel = getPanelFromElement(btn);
+
+        if (multiState.apt && multiState.apt !== apt) {
+            showOverlayMessage('Le settimane devono appartenere allo stesso appartamento. Selezione azzerata.', 'warning');
+            clearSelections(panel);
+        }
+
+        multiState.apt = apt;
+        var key = dateIn + '|' + dateOut;
+        var existingIndex = -1;
+        for (var i = 0; i < multiState.selections.length; i++) {
+            if (selectionKey(multiState.selections[i]) === key) {
+                existingIndex = i;
+                break;
+            }
+        }
+        if (existingIndex >= 0) {
+            multiState.selections.splice(existingIndex, 1);
+            btn.removeClass('is-selected').text('[Seleziona]');
+        } else {
+            multiState.selections.push({ in: dateIn, out: dateOut });
+            btn.addClass('is-selected').text('[Selezionata]');
+        }
+        updateMultiPanel(panel);
+    });
+
+    $(document).on('click', '.paguro-multi-confirm', function(e) {
+        e.preventDefault();
+        var btn = $(this);
+        if (btn.hasClass('is-disabled')) return;
+        if (!multiState.selections.length || !multiState.apt) {
+            showOverlayMessage('Seleziona almeno una settimana prima di confermare.', 'warning');
+            return;
+        }
+
+        var triedRefresh = false;
+        var chatRoot = btn.closest('.paguro-chat-window, .paguro-chat-root');
+        var chatBody = chatRoot.find('.paguro-chat-body');
+
+        function sendMultiLock() {
+            withRecaptcha('paguro_lock_multi', function(token) {
+                $.post(data.ajax_url, {
+                    action: 'paguro_lock_dates_multi',
+                    nonce: data.nonce,
+                    recaptcha_token: token || '',
+                    apt_name: multiState.apt,
+                    dates: JSON.stringify(multiState.selections)
+                }, function(res) {
+                    if (res.success) {
+                        var targetUrl = res.data.redirect_url ? res.data.redirect_url : (data.booking_url + res.data.redirect_params);
+                        window.location.href = targetUrl;
+                    } else {
+                        var errMsgRaw = res.data && res.data.msg ? res.data.msg : "Errore";
+                        if (!triedRefresh && /sessione scaduta/i.test(errMsgRaw)) {
+                            triedRefresh = true;
+                            refreshNonce().then(sendMultiLock).catch(function() {
+                                showOverlayMessage("⚠️ " + errMsgRaw, 'error');
+                            });
+                            return;
+                        }
+                        if (res.data && res.data.unavailable && Array.isArray(res.data.unavailable)) {
+                            res.data.unavailable.forEach(function(u) {
+                                var key = (u.in_raw || u.in) + '|' + (u.out_raw || u.out);
+                                multiState.selections = multiState.selections.filter(function(s) {
+                                    return selectionKey(s) !== key;
+                                });
+                                $('.paguro-week-toggle.is-selected').each(function() {
+                                    var t = $(this);
+                                    if (t.data('in') === u.in_raw || t.data('in') === u.in) {
+                                        t.removeClass('is-selected').text('[Seleziona]');
+                                    }
+                                });
+                            });
+                            updateMultiPanel(getPanelFromElement(btn));
+                        }
+                        if (res.data && res.data.suggestions_html) {
+                            appendBotMsg(chatBody, res.data.suggestions_html);
+                        }
+                        showOverlayMessage("⚠️ " + errMsgRaw, 'error');
+                    }
+                }).fail(function() {
+                    showOverlayMessage("❌ Errore di connessione", 'error');
+                });
+            });
+        }
+
+        if (!data.nonce) {
+            refreshNonce().then(sendMultiLock).catch(sendMultiLock);
+        } else {
+            sendMultiLock();
+        }
+    });
+
+    // =========================================================
     // QUOTE/WAITLIST FORM SUBMIT
     // =========================================================
 

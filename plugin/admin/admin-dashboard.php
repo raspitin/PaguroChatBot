@@ -26,6 +26,7 @@ if (isset($_POST['paguro_save_opts']) && check_admin_referer('paguro_admin_opts'
     update_option('paguro_season_start', sanitize_text_field(wp_unslash($_POST['season_start'] ?? '')));
     update_option('paguro_season_end', sanitize_text_field(wp_unslash($_POST['season_end'] ?? '')));
     update_option('paguro_deposit_percent', intval(wp_unslash($_POST['deposit_percent'] ?? 0)));
+    update_option('paguro_group_discount_map', sanitize_text_field(wp_unslash($_POST['group_discount_map'] ?? '')));
     update_option('paguro_bank_iban', sanitize_text_field(wp_unslash($_POST['bank_iban'] ?? '')));
     update_option('paguro_bank_owner', sanitize_text_field(wp_unslash($_POST['bank_owner'] ?? '')));
     update_option('paguro_api_url', esc_url_raw(wp_unslash($_POST['paguro_api_url'] ?? '')));
@@ -130,6 +131,7 @@ if (isset($_POST['paguro_save_web_templates']) && check_admin_referer('paguro_we
     update_option('paguro_msg_ui_cancel_help', wp_kses_post(wp_unslash($_POST['ui_cancel_help'] ?? '')));
     update_option('paguro_msg_ui_cancel_confirm', sanitize_textarea_field(wp_unslash($_POST['ui_cancel_confirm'] ?? '')));
     update_option('paguro_msg_ui_cancel_cta', sanitize_text_field(wp_unslash($_POST['ui_cancel_cta'] ?? '')));
+    update_option('paguro_msg_ui_group_week_confirm', sanitize_textarea_field(wp_unslash($_POST['ui_group_week_confirm'] ?? '')));
     update_option('paguro_msg_ui_cancel_deadline_note', sanitize_textarea_field(wp_unslash($_POST['ui_cancel_deadline_note'] ?? '')));
     update_option('paguro_msg_ui_cancel_unavailable', wp_kses_post(wp_unslash($_POST['ui_cancel_unavailable'] ?? '')));
     update_option('paguro_msg_ui_cancel_requested_notice', sanitize_textarea_field(wp_unslash($_POST['ui_cancel_requested_notice'] ?? '')));
@@ -173,6 +175,29 @@ if (isset($_POST['paguro_apt_action']) && check_admin_referer('paguro_apt_nonce'
                 'pricing_json' => json_encode([])
             ]);
             echo '<div class="notice notice-success is-dismissible"><p><strong>✓</strong> Appartamento aggiunto.</p></div>';
+        }
+    }
+    if ($_POST['paguro_apt_action'] === 'update_apt') {
+        $id = intval($_POST['apt_id'] ?? 0);
+        $name = sanitize_text_field(wp_unslash($_POST['apt_name'] ?? ''));
+        $price = floatval(wp_unslash($_POST['apt_price'] ?? 0));
+        $pricing_week = isset($_POST['pricing_week']) && is_array($_POST['pricing_week']) ? $_POST['pricing_week'] : [];
+        $pricing = [];
+        foreach ($pricing_week as $k => $v) {
+            $key = sanitize_text_field(wp_unslash($k));
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $key)) continue;
+            $val = floatval(wp_unslash($v));
+            if ($val > 0) {
+                $pricing[$key] = $val;
+            }
+        }
+        if ($id > 0 && $name && $price > 0) {
+            $wpdb->update($table_apt, [
+                'name' => $name,
+                'base_price' => $price,
+                'pricing_json' => json_encode($pricing)
+            ], ['id' => $id]);
+            echo '<div class="notice notice-success is-dismissible"><p><strong>✓</strong> Appartamento aggiornato.</p></div>';
         }
     }
     if ($_POST['paguro_apt_action'] === 'delete_apt') {
@@ -242,6 +267,9 @@ if (isset($_POST['paguro_action']) && check_admin_referer('paguro_admin_action')
                 paguro_add_history($req_id, 'ADMIN_REFUND_SEND_FAIL', 'Invio email bonifico disposto fallito');
             }
             paguro_send_cancellation_to_admin($req_id);
+            if (!empty($booking->group_id) && function_exists('paguro_maybe_update_group_quote_after_cancel')) {
+                paguro_maybe_update_group_quote_after_cancel($booking->group_id);
+            }
             echo '<div class="notice notice-success is-dismissible"><p><strong>✓</strong> Cancellazione confermata.</p></div>';
         }
 
@@ -345,7 +373,7 @@ if ($pending_cancel_requests > 0) {
 }
 
 // ====== INSERIMENTO MANUALE PRENOTAZIONE ======
-if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual_nonce')) {
+if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual_nonce', 'paguro_manual_nonce')) {
     $apt_id = intval(wp_unslash($_POST['apt_id'] ?? 0));
     $start = sanitize_text_field(wp_unslash($_POST['date_start'] ?? ''));
     $end = sanitize_text_field(wp_unslash($_POST['date_end'] ?? ''));
@@ -618,6 +646,16 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
         .paguro-details table {
             margin-top: 10px;
         }
+        .paguro-group-base {
+            background-color: #eef3ff !important;
+        }
+        .paguro-group-alt {
+            background-color: #e3ecff !important;
+        }
+        .paguro-group-base td:first-child,
+        .paguro-group-alt td:first-child {
+            border-left: 3px solid #6f8fd6;
+        }
     </style>
 
     <nav class="nav-tab-wrapper">
@@ -653,7 +691,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                     <option value="">-- Seleziona --</option>
                                     <?php $apts = $wpdb->get_results("SELECT * FROM $table_apt ORDER BY name");
                                     foreach ($apts as $apt) {
-                                        echo '<option value="' . $apt->id . '">' . esc_html($apt->name) . ' (€' . number_format($apt->base_price, 2) . '/notte)</option>';
+                                        echo '<option value="' . $apt->id . '">' . esc_html($apt->name) . ' (€' . number_format($apt->base_price, 2) . '/settimana)</option>';
                                     } ?>
                                 </select>
                             </td>
@@ -745,7 +783,144 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                         ));
                     }
                     if ($bookings) {
+                        $grouped = [];
                         foreach ($bookings as $b) {
+                            if (!empty($b->group_id)) {
+                                if (!isset($grouped[$b->group_id])) $grouped[$b->group_id] = [];
+                                $grouped[$b->group_id][] = $b;
+                            }
+                        }
+                        $rendered_groups = [];
+                        $group_index = 0;
+                        foreach ($bookings as $b) {
+                            if (!empty($b->group_id)) {
+                                if (isset($rendered_groups[$b->group_id])) {
+                                    continue;
+                                }
+                                $rendered_groups[$b->group_id] = true;
+                                $group_index++;
+                                $group_class = ($group_index % 2 === 0) ? 'paguro-group-alt' : 'paguro-group-base';
+                                $children = $grouped[$b->group_id];
+                                $first = $children[0];
+                                $apt = $wpdb->get_row($wpdb->prepare("SELECT name FROM $table_apt WHERE id=%d", $first->apartment_id));
+                                $last = $children[count($children) - 1];
+                                $all_confirmed = true;
+                                $all_cancelled = true;
+                                $any_confirmed = false;
+                                $any_receipt = false;
+                                $receipt_link = '';
+                                foreach ($children as $cb) {
+                                    if ($cb->status != 1) $all_confirmed = false;
+                                    if ($cb->status == 1) $any_confirmed = true;
+                                    if ($cb->status != 3) $all_cancelled = false;
+                                    if (!empty($cb->receipt_url) && !$receipt_link) {
+                                        $receipt_link = paguro_get_admin_receipt_link($cb->id, $cb->receipt_url);
+                                        $any_receipt = true;
+                                    }
+                                }
+                                $group_status = $all_cancelled ? 'Cancellata' : ($all_confirmed ? 'Confermata' : ($any_confirmed ? 'Parziale' : 'Preventivo'));
+                                $group_status_class = $all_confirmed ? 'paguro-badge--green' : ($all_cancelled ? 'paguro-badge--red' : ($any_confirmed ? 'paguro-badge--orange' : 'paguro-badge--gray'));
+                                $group_id_short = substr($b->group_id, 0, 8);
+                                $group_link = site_url("/" . get_option('paguro_page_slug', 'riepilogo-prenotazione') . "/?token={$b->group_id}");
+                                ?>
+                                <tr class="paguro-group-row <?php echo esc_attr($group_class); ?>" data-group="<?php echo esc_attr($b->group_id); ?>">
+                                    <td><strong>GRP-<?php echo esc_html($group_id_short); ?></strong></td>
+                                    <td><?php echo esc_html($first->guest_name); ?><br><small><?php echo esc_html($first->guest_email); ?></small></td>
+                                    <td><?php echo esc_html($apt->name ?? 'N/A'); ?></td>
+                                    <td><?php echo date('d/m/Y', strtotime($children[0]->date_start)); ?></td>
+                                    <td><?php echo date('d/m/Y', strtotime($last->date_end)); ?></td>
+                                    <td><span class="paguro-badge <?php echo esc_attr($group_status_class); ?>"><?php echo esc_html($group_status); ?></span></td>
+                                    <td>
+                                        <?php if ($any_receipt) { ?>
+                                            <a href="#" data-receipt-url="<?php echo esc_url($receipt_link); ?>" class="button button-small paguro-admin-receipt-link" onclick="return paguroAdminShowReceipt(this);">Vedi</a>
+                                        <?php } else { ?>
+                                            <span style="color:#999;">—</span>
+                                        <?php } ?>
+                                    </td>
+                                    <td><span style="color:#999;">—</span></td>
+                                    <td>
+                                        <a href="<?php echo esc_url($group_link); ?>" class="button button-small">Riepilogo</a>
+                                        <button type="button" class="button button-small paguro-group-toggle" data-group="<?php echo esc_attr($b->group_id); ?>">Dettagli</button>
+                                    </td>
+                                </tr>
+                                <?php
+                                foreach ($children as $cb) {
+                                    $apt_child = $wpdb->get_row($wpdb->prepare("SELECT name FROM $table_apt WHERE id=%d", $cb->apartment_id));
+                                    $status_labels = [
+                                        1 => 'Confermata',
+                                        2 => 'Preventivo',
+                                        3 => 'Cancellata',
+                                        4 => 'Waitlist',
+                                        5 => 'Richiesta cancellazione',
+                                    ];
+                                    $status_classes = [
+                                        1 => 'paguro-badge--green',
+                                        2 => 'paguro-badge--gray',
+                                        3 => 'paguro-badge--red',
+                                        4 => 'paguro-badge--blue',
+                                        5 => 'paguro-badge--orange',
+                                    ];
+                                    $status_label = $status_labels[$cb->status] ?? 'Sconosciuto';
+                                    $status_class = $status_classes[$cb->status] ?? 'paguro-badge--gray';
+                                    $status_action = '';
+                                    $status_confirm = '';
+                                    if ($cb->status == 2 && !empty($cb->receipt_url)) {
+                                        $status_label = 'Distinta (in validazione)';
+                                        $status_class = 'paguro-badge--yellow';
+                                        $status_action = 'validate_receipt';
+                                        $status_confirm = 'Validare la distinta e confermare la prenotazione?';
+                                    } elseif ($cb->status == 5) {
+                                        $status_action = 'confirm_cancel';
+                                        $status_confirm = 'Confermare la cancellazione?';
+                                    }
+                                    if ($status_action) {
+                                        $status_label = '<button type="submit" name="paguro_action" value="' . esc_attr($status_action) . '" class="button button-small paguro-admin-confirm" data-confirm="' . esc_attr($status_confirm) . '">' . esc_html($status_label) . '</button>';
+                                    } else {
+                                        $status_label = '<span class="paguro-badge ' . esc_attr($status_class) . '">' . esc_html($status_label) . '</span>';
+                                    }
+                                    ?>
+                                    <tr class="paguro-group-child <?php echo esc_attr($group_class); ?>" data-group="<?php echo esc_attr($b->group_id); ?>" style="display:none;">
+                                        <td>&nbsp;&nbsp;↳ <?php echo $cb->id; ?></td>
+                                        <td><?php echo esc_html($cb->guest_name); ?><br><small><?php echo esc_html($cb->guest_email); ?></small></td>
+                                        <td><?php echo esc_html($apt_child->name ?? 'N/A'); ?></td>
+                                        <td><?php echo date('d/m/Y', strtotime($cb->date_start)); ?></td>
+                                        <td><?php echo date('d/m/Y', strtotime($cb->date_end)); ?></td>
+                                        <td>
+                                            <form method="POST" style="display:inline;">
+                                                <?php wp_nonce_field('paguro_admin_action'); ?>
+                                                <input type="hidden" name="booking_id" value="<?php echo $cb->id; ?>">
+                                                <?php echo $status_label; ?>
+                                            </form>
+                                        </td>
+                                        <td>
+                                            <?php if (!empty($cb->receipt_url)) { ?>
+                                                <a href="#" data-receipt-url="<?php echo esc_url(paguro_get_admin_receipt_link($cb->id, $cb->receipt_url)); ?>" class="button button-small paguro-admin-receipt-link" onclick="return paguroAdminShowReceipt(this);">Vedi</a>
+                                            <?php } else { ?>
+                                                <span style="color:#999;">—</span>
+                                            <?php } ?>
+                                        </td>
+                                        <td>
+                                            <?php if (!empty($cb->history_log)) { ?>
+                                                <a href="#" class="button button-small paguro-history-toggle" data-history="<?php echo esc_attr(base64_encode($cb->history_log)); ?>" title="Mostra log" onclick="return paguroAdminShowLog(this);">🕒</a>
+                                            <?php } else { ?>
+                                                <span style="color:#999;">—</span>
+                                            <?php } ?>
+                                        </td>
+                                        <td>
+                                            <form method="POST" style="display: inline;">
+                                                <?php wp_nonce_field('paguro_admin_action'); ?>
+                                                <input type="hidden" name="booking_id" value="<?php echo $cb->id; ?>">
+                                                <button type="submit" name="paguro_action" value="resend_email" class="button button-small">Reinvia Email</button>
+                                                <button type="submit" name="paguro_action" value="anonymize" class="button button-small paguro-admin-confirm" data-confirm="Anonimizzare i dati?">GDPR</button>
+                                                <button type="submit" name="paguro_action" value="delete_booking" class="button button-small button-link-delete paguro-admin-confirm" data-confirm="Elimina?">Elimina</button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                    <?php
+                                }
+                                continue;
+                            }
+
                             $apt = $wpdb->get_row($wpdb->prepare("SELECT name FROM $table_apt WHERE id=%d", $b->apartment_id));
                             $status_labels = [
                                 1 => 'Confermata',
@@ -763,8 +938,8 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                             ];
                             $status_label = $status_labels[$b->status] ?? 'Sconosciuto';
                             $status_class = $status_classes[$b->status] ?? 'paguro-badge--gray';
-                                $status_action = '';
-                                $status_confirm = '';
+                            $status_action = '';
+                            $status_confirm = '';
                             if ($b->status == 2 && !empty($b->receipt_url)) {
                                 $status_label = 'Distinta (in validazione)';
                                 $status_class = 'paguro-badge--yellow';
@@ -774,9 +949,9 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                 $status_action = 'confirm_cancel';
                                 $status_confirm = 'Confermare la cancellazione?';
                             }
-                                if ($status_action) {
-                                    $status_label = '<button type="submit" name="paguro_action" value="' . esc_attr($status_action) . '" class="button button-small paguro-admin-confirm" data-confirm="' . esc_attr($status_confirm) . '">' . esc_html($status_label) . '</button>';
-                                } else {
+                            if ($status_action) {
+                                $status_label = '<button type="submit" name="paguro_action" value="' . esc_attr($status_action) . '" class="button button-small paguro-admin-confirm" data-confirm="' . esc_attr($status_confirm) . '">' . esc_html($status_label) . '</button>';
+                            } else {
                                 $status_label = '<span class="paguro-badge ' . esc_attr($status_class) . '">' . esc_html($status_label) . '</span>';
                             }
                             ?>
@@ -813,7 +988,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                         <input type="hidden" name="booking_id" value="<?php echo $b->id; ?>">
                                         <button type="submit" name="paguro_action" value="resend_email" class="button button-small">Reinvia Email</button>
                                         <button type="submit" name="paguro_action" value="anonymize" class="button button-small paguro-admin-confirm" data-confirm="Anonimizzare i dati?">GDPR</button>
-                                        <button type="submit" name="paguro_action" value="delete_booking" class="button button-small button-link-delete paguro-admin-confirm" data-confirm="Eliminare?">Elimina</button>
+                                        <button type="submit" name="paguro_action" value="delete_booking" class="button button-small button-link-delete paguro-admin-confirm" data-confirm="Elimina?">Elimina</button>
                                     </form>
                                 </td>
                             </tr>
@@ -825,12 +1000,452 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                     ?>
                 </tbody>
             </table>
+            <details class="paguro-details paguro-finance-details">
+                <summary>Situazione Economica</summary>
+            <?php
+            $season_start_fin = get_option('paguro_season_start', '2026-06-01');
+            $season_end_fin = get_option('paguro_season_end', '2026-09-30');
+            $finance_bookings = $wpdb->get_results($wpdb->prepare(
+                "SELECT * FROM {$wpdb->prefix}paguro_availability
+                 WHERE status != 4 AND date_end >= %s AND date_start <= %s
+                 ORDER BY date_start ASC",
+                $season_start_fin,
+                $season_end_fin
+            ));
+            $finance_grouped = [];
+            foreach ($finance_bookings as $fb) {
+                if (!empty($fb->group_id)) {
+                    if (!isset($finance_grouped[$fb->group_id])) $finance_grouped[$fb->group_id] = [];
+                    $finance_grouped[$fb->group_id][] = $fb;
+                }
+            }
+            $finance_rendered_groups = [];
+            $deposit_percent = intval(get_option('paguro_deposit_percent', 30));
+            $sum_deposit_received = 0;
+            $sum_remaining = 0;
+            $sum_forecast = 0;
+            $sum_refunds = 0;
 
+            $apt_rows = $wpdb->get_results("SELECT id, name FROM $table_apt ORDER BY name");
+            $apt_map = [];
+            foreach ($apt_rows as $apt_item) {
+                $apt_map[$apt_item->id] = $apt_item->name;
+            }
+            ?>
+
+            <div class="paguro-finance-summary">
+                <div class="paguro-finance-card">
+                    <span class="label">Acconti ricevuti</span>
+                    <strong class="value" id="paguro-fin-deposit">€ 0,00</strong>
+                </div>
+                <div class="paguro-finance-card">
+                    <span class="label">Saldi previsti</span>
+                    <strong class="value" id="paguro-fin-remaining">€ 0,00</strong>
+                </div>
+                <div class="paguro-finance-card">
+                    <span class="label">Previsione incasso</span>
+                    <strong class="value" id="paguro-fin-forecast">€ 0,00</strong>
+                </div>
+                <div class="paguro-finance-card">
+                    <span class="label">Caparre restituite</span>
+                    <strong class="value" id="paguro-fin-refunds">€ 0,00</strong>
+                </div>
+            </div>
+
+            <table class="widefat striped paguro-finance-table">
+                <thead>
+                    <tr>
+                        <th width="80">ID</th>
+                        <th>Guest</th>
+                        <th>Appartamento</th>
+                        <th>Arrivo</th>
+                        <th>Partenza</th>
+                        <th>Stato</th>
+                        <th>Totale</th>
+                        <th>Acconto</th>
+                        <th>Acconto ricevuto</th>
+                        <th>Saldo previsto</th>
+                        <th>Incasso previsto</th>
+                        <th>Rimborso</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php
+                    if ($finance_bookings) {
+                        foreach ($finance_bookings as $b) {
+                            if (!empty($b->group_id)) {
+                                if (isset($finance_rendered_groups[$b->group_id])) {
+                                    continue;
+                                }
+                                $finance_rendered_groups[$b->group_id] = true;
+                                $children = $finance_grouped[$b->group_id];
+                                $first = $children[0];
+                                $last = $children[count($children) - 1];
+                                $apt_name = $apt_map[$first->apartment_id] ?? 'N/A';
+
+                                $all_confirmed = true;
+                                $all_cancelled = true;
+                                $any_confirmed = false;
+                                $any_receipt = false;
+                                foreach ($children as $cb) {
+                                    if ($cb->status != 1) $all_confirmed = false;
+                                    if ($cb->status == 1) $any_confirmed = true;
+                                    if ($cb->status != 3) $all_cancelled = false;
+                                    if (!empty($cb->receipt_url) || $cb->status == 1) $any_receipt = true;
+                                }
+                                $group_status = $all_cancelled ? 'Cancellata' : ($all_confirmed ? 'Confermata' : ($any_confirmed ? 'Parziale' : 'Preventivo'));
+                                $group_status_class = $all_confirmed ? 'paguro-badge--green' : ($all_cancelled ? 'paguro-badge--red' : ($any_confirmed ? 'paguro-badge--orange' : 'paguro-badge--gray'));
+
+                                $totals = function_exists('paguro_calculate_group_totals') ? paguro_calculate_group_totals($b->group_id, $children) : [
+                                    'weeks_count' => 0,
+                                    'total_final' => 0,
+                                    'deposit' => 0,
+                                    'remaining' => 0
+                                ];
+                                $total_final = $totals['total_final'];
+                                $deposit = $totals['deposit'];
+                                $remaining = $totals['remaining'];
+
+                                $deposit_received = $any_receipt ? $deposit : 0;
+                                $active_for_forecast = !$all_cancelled && $totals['weeks_count'] > 0;
+                                $deposit_pending = $active_for_forecast ? max(0, $deposit - $deposit_received) : 0;
+                                $remaining_expected = $active_for_forecast ? $remaining : 0;
+                                $forecast = $deposit_pending + $remaining_expected;
+
+                                $refund_amount = 0;
+                                foreach ($children as $cb) {
+                                    if ($cb->status != 3) continue;
+                                    $history = $cb->history_log ? json_decode($cb->history_log, true) : [];
+                                    if (!is_array($history)) $history = [];
+                                    $refund_sent = false;
+                                    foreach ($history as $entry) {
+                                        if (!empty($entry['action']) && $entry['action'] === 'ADMIN_REFUND_SENT') {
+                                            $refund_sent = true;
+                                            break;
+                                        }
+                                    }
+                                    if ($refund_sent && function_exists('paguro_calculate_quote')) {
+                                        $week_total = paguro_calculate_quote($cb->apartment_id, $cb->date_start, $cb->date_end);
+                                        $refund_amount += ceil($week_total * ($deposit_percent / 100));
+                                    }
+                                }
+
+                                if ($active_for_forecast) {
+                                    $sum_deposit_received += $deposit_received;
+                                    $sum_remaining += $remaining_expected;
+                                    $sum_forecast += $forecast;
+                                }
+                                $sum_refunds += $refund_amount;
+
+                                $group_id_short = substr($b->group_id, 0, 8);
+                                ?>
+                                <tr class="paguro-finance-group-row" data-group="<?php echo esc_attr($b->group_id); ?>">
+                                    <td>
+                                        <strong>GRP-<?php echo esc_html($group_id_short); ?></strong><br>
+                                        <button type="button" class="button button-small paguro-finance-toggle" data-group="<?php echo esc_attr($b->group_id); ?>">Dettagli</button>
+                                    </td>
+                                    <td><?php echo esc_html($first->guest_name); ?><br><small><?php echo esc_html($first->guest_email); ?></small></td>
+                                    <td><?php echo esc_html($apt_name); ?></td>
+                                    <td><?php echo date('d/m/Y', strtotime($children[0]->date_start)); ?></td>
+                                    <td><?php echo date('d/m/Y', strtotime($last->date_end)); ?></td>
+                                    <td><span class="paguro-badge <?php echo esc_attr($group_status_class); ?>"><?php echo esc_html($group_status); ?></span></td>
+                                    <td>€ <?php echo number_format($total_final, 2, ',', '.'); ?></td>
+                                    <td>€ <?php echo number_format($deposit, 2, ',', '.'); ?></td>
+                                    <td><?php echo $deposit_received > 0 ? ('€ ' . number_format($deposit_received, 2, ',', '.')) : '—'; ?></td>
+                                    <td><?php echo $remaining_expected > 0 ? ('€ ' . number_format($remaining_expected, 2, ',', '.')) : '—'; ?></td>
+                                    <td><?php echo $forecast > 0 ? ('€ ' . number_format($forecast, 2, ',', '.')) : '—'; ?></td>
+                                    <td><?php echo $refund_amount > 0 ? ('€ ' . number_format($refund_amount, 2, ',', '.')) : '—'; ?></td>
+                                </tr>
+                                <?php
+                                foreach ($children as $cb) {
+                                    $apt_child = $apt_map[$cb->apartment_id] ?? 'N/A';
+                                    $status_labels = [
+                                        1 => 'Confermata',
+                                        2 => 'Preventivo',
+                                        3 => 'Cancellata',
+                                        4 => 'Waitlist',
+                                        5 => 'Richiesta cancellazione',
+                                    ];
+                                    $status_classes = [
+                                        1 => 'paguro-badge--green',
+                                        2 => 'paguro-badge--gray',
+                                        3 => 'paguro-badge--red',
+                                        4 => 'paguro-badge--blue',
+                                        5 => 'paguro-badge--orange',
+                                    ];
+                                    $status_label = $status_labels[$cb->status] ?? 'Sconosciuto';
+                                    $status_class = $status_classes[$cb->status] ?? 'paguro-badge--gray';
+
+                                    $total_cost = function_exists('paguro_calculate_quote') ? paguro_calculate_quote($cb->apartment_id, $cb->date_start, $cb->date_end) : 0;
+                                    $deposit_cb = ceil($total_cost * ($deposit_percent / 100));
+                                    $remaining_cb = $total_cost - $deposit_cb;
+                                    $deposit_received_cb = ($cb->status == 1 || !empty($cb->receipt_url)) ? $deposit_cb : 0;
+                                    $active_cb = in_array((int) $cb->status, [1, 2, 5], true);
+                                    $forecast_cb = $active_cb ? max(0, $deposit_cb - $deposit_received_cb) + $remaining_cb : 0;
+
+                                    $refund_cb = 0;
+                                    if ($cb->status == 3) {
+                                        $history = $cb->history_log ? json_decode($cb->history_log, true) : [];
+                                        if (!is_array($history)) $history = [];
+                                        foreach ($history as $entry) {
+                                            if (!empty($entry['action']) && $entry['action'] === 'ADMIN_REFUND_SENT') {
+                                                $refund_cb = $deposit_cb;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    ?>
+                                    <tr class="paguro-finance-child" data-group="<?php echo esc_attr($b->group_id); ?>" style="display:none;">
+                                        <td>&nbsp;&nbsp;↳ <?php echo $cb->id; ?></td>
+                                        <td><?php echo esc_html($cb->guest_name); ?><br><small><?php echo esc_html($cb->guest_email); ?></small></td>
+                                        <td><?php echo esc_html($apt_child); ?></td>
+                                        <td><?php echo date('d/m/Y', strtotime($cb->date_start)); ?></td>
+                                        <td><?php echo date('d/m/Y', strtotime($cb->date_end)); ?></td>
+                                        <td><span class="paguro-badge <?php echo esc_attr($status_class); ?>"><?php echo esc_html($status_label); ?></span></td>
+                                        <td>€ <?php echo number_format($total_cost, 2, ',', '.'); ?></td>
+                                        <td>€ <?php echo number_format($deposit_cb, 2, ',', '.'); ?></td>
+                                        <td><?php echo $deposit_received_cb > 0 ? ('€ ' . number_format($deposit_received_cb, 2, ',', '.')) : '—'; ?></td>
+                                        <td><?php echo $remaining_cb > 0 ? ('€ ' . number_format($remaining_cb, 2, ',', '.')) : '—'; ?></td>
+                                        <td><?php echo $forecast_cb > 0 ? ('€ ' . number_format($forecast_cb, 2, ',', '.')) : '—'; ?></td>
+                                        <td><?php echo $refund_cb > 0 ? ('€ ' . number_format($refund_cb, 2, ',', '.')) : '—'; ?></td>
+                                    </tr>
+                                    <?php
+                                }
+                                continue;
+                            }
+
+                            $apt_name = $apt_map[$b->apartment_id] ?? 'N/A';
+                            $status_labels = [
+                                1 => 'Confermata',
+                                2 => 'Preventivo',
+                                3 => 'Cancellata',
+                                4 => 'Waitlist',
+                                5 => 'Richiesta cancellazione',
+                            ];
+                            $status_classes = [
+                                1 => 'paguro-badge--green',
+                                2 => 'paguro-badge--gray',
+                                3 => 'paguro-badge--red',
+                                4 => 'paguro-badge--blue',
+                                5 => 'paguro-badge--orange',
+                            ];
+                            $status_label = $status_labels[$b->status] ?? 'Sconosciuto';
+                            $status_class = $status_classes[$b->status] ?? 'paguro-badge--gray';
+
+                            $total_cost = function_exists('paguro_calculate_quote') ? paguro_calculate_quote($b->apartment_id, $b->date_start, $b->date_end) : 0;
+                            $deposit = ceil($total_cost * ($deposit_percent / 100));
+                            $remaining = $total_cost - $deposit;
+                            $deposit_received = ($b->status == 1 || !empty($b->receipt_url)) ? $deposit : 0;
+                            $active = in_array((int) $b->status, [1, 2, 5], true);
+                            $deposit_pending = $active ? max(0, $deposit - $deposit_received) : 0;
+                            $remaining_expected = $active ? $remaining : 0;
+                            $forecast = $deposit_pending + $remaining_expected;
+
+                            $refund_amount = 0;
+                            if ($b->status == 3) {
+                                $history = $b->history_log ? json_decode($b->history_log, true) : [];
+                                if (!is_array($history)) $history = [];
+                                foreach ($history as $entry) {
+                                    if (!empty($entry['action']) && $entry['action'] === 'ADMIN_REFUND_SENT') {
+                                        $refund_amount = $deposit;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if ($active) {
+                                $sum_deposit_received += $deposit_received;
+                                $sum_remaining += $remaining_expected;
+                                $sum_forecast += $forecast;
+                            }
+                            $sum_refunds += $refund_amount;
+                            ?>
+                            <tr>
+                                <td><?php echo $b->id; ?></td>
+                                <td><?php echo esc_html($b->guest_name); ?><br><small><?php echo esc_html($b->guest_email); ?></small></td>
+                                <td><?php echo esc_html($apt_name); ?></td>
+                                <td><?php echo date('d/m/Y', strtotime($b->date_start)); ?></td>
+                                <td><?php echo date('d/m/Y', strtotime($b->date_end)); ?></td>
+                                <td><span class="paguro-badge <?php echo esc_attr($status_class); ?>"><?php echo esc_html($status_label); ?></span></td>
+                                <td>€ <?php echo number_format($total_cost, 2, ',', '.'); ?></td>
+                                <td>€ <?php echo number_format($deposit, 2, ',', '.'); ?></td>
+                                <td><?php echo $deposit_received > 0 ? ('€ ' . number_format($deposit_received, 2, ',', '.')) : '—'; ?></td>
+                                <td><?php echo $remaining_expected > 0 ? ('€ ' . number_format($remaining_expected, 2, ',', '.')) : '—'; ?></td>
+                                <td><?php echo $forecast > 0 ? ('€ ' . number_format($forecast, 2, ',', '.')) : '—'; ?></td>
+                                <td><?php echo $refund_amount > 0 ? ('€ ' . number_format($refund_amount, 2, ',', '.')) : '—'; ?></td>
+                            </tr>
+                            <?php
+                        }
+                    } else {
+                        echo '<tr><td colspan="12" style="text-align:center; padding: 18px;">Nessun dato economico per la stagione.</td></tr>';
+                    }
+                    ?>
+                </tbody>
+            </table>
+
+            <script>
+            (function(){
+                var summary = {
+                    deposit: <?php echo json_encode(number_format($sum_deposit_received, 2, ',', '.')); ?>,
+                    remaining: <?php echo json_encode(number_format($sum_remaining, 2, ',', '.')); ?>,
+                    forecast: <?php echo json_encode(number_format($sum_forecast, 2, ',', '.')); ?>,
+                    refunds: <?php echo json_encode(number_format($sum_refunds, 2, ',', '.')); ?>
+                };
+                var setText = function(id, value){
+                    var el = document.getElementById(id);
+                    if (el) el.textContent = '€ ' + value;
+                };
+                setText('paguro-fin-deposit', summary.deposit);
+                setText('paguro-fin-remaining', summary.remaining);
+                setText('paguro-fin-forecast', summary.forecast);
+                setText('paguro-fin-refunds', summary.refunds);
+
+                document.querySelectorAll('.paguro-finance-toggle').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        var group = btn.getAttribute('data-group');
+                        if (!group) return;
+                        document.querySelectorAll('.paguro-finance-child[data-group="' + group + '"]').forEach(function(row) {
+                            row.style.display = (row.style.display === 'none' || row.style.display === '') ? 'table-row' : 'none';
+                        });
+                    });
+                });
+            })();
+            </script>
+            </details>
         <?php } ?>
-
-        <!-- TAB: APPARTAMENTI -->
+<!-- TAB: APPARTAMENTI -->
         <?php if ($current_tab === 'apartments') { ?>
             <h2>Gestione Appartamenti</h2>
+            <?php
+            $edit_apt_id = isset($_GET['edit_apt']) ? intval($_GET['edit_apt']) : 0;
+            $edit_apt = $edit_apt_id > 0 ? $wpdb->get_row($wpdb->prepare("SELECT * FROM $table_apt WHERE id=%d", $edit_apt_id)) : null;
+            $apt_cancel_url = add_query_arg('tab', 'apartments', admin_url('admin.php?page=paguro-booking'));
+            $season_start = get_option('paguro_season_start', '2026-06-01');
+            $season_end = get_option('paguro_season_end', '2026-09-30');
+            $season_start_dt = new DateTime($season_start);
+            $season_end_dt = new DateTime($season_end);
+            if ($season_start_dt->format('N') != 6) {
+                $season_start_dt->modify('next saturday');
+            }
+            $edit_prices = [];
+            if ($edit_apt && !empty($edit_apt->pricing_json)) {
+                $decoded = json_decode($edit_apt->pricing_json, true);
+                if (is_array($decoded)) {
+                    $edit_prices = $decoded;
+                }
+            }
+            $all_apts = $wpdb->get_results("SELECT * FROM $table_apt ORDER BY name");
+            $apt_pricing_map = [];
+            foreach ($all_apts as $apt_item) {
+                $decoded = $apt_item->pricing_json ? json_decode($apt_item->pricing_json, true) : [];
+                if (!is_array($decoded)) {
+                    $decoded = [];
+                }
+                $apt_pricing_map[$apt_item->id] = [
+                    'base_price' => floatval($apt_item->base_price),
+                    'pricing' => $decoded
+                ];
+            }
+            $month_names = [
+                '01' => 'Gennaio',
+                '02' => 'Febbraio',
+                '03' => 'Marzo',
+                '04' => 'Aprile',
+                '05' => 'Maggio',
+                '06' => 'Giugno',
+                '07' => 'Luglio',
+                '08' => 'Agosto',
+                '09' => 'Settembre',
+                '10' => 'Ottobre',
+                '11' => 'Novembre',
+                '12' => 'Dicembre'
+            ];
+            ?>
+
+            <?php if ($edit_apt) { ?>
+                <div class="card">
+                    <h3>✏️ Modifica Appartamento</h3>
+                    <form method="POST" style="max-width: 900px;">
+                        <?php wp_nonce_field('paguro_apt_nonce'); ?>
+                        <input type="hidden" name="apt_id" value="<?php echo intval($edit_apt->id); ?>">
+                        <table class="form-table">
+                            <tr>
+                                <th>Nome</th>
+                                <td><input type="text" name="apt_name" value="<?php echo esc_attr($edit_apt->name); ?>" required></td>
+                            </tr>
+                            <tr>
+                                <th>Prezzo Base (€/settimana)</th>
+                                <td><input type="number" name="apt_price" step="0.01" min="0" value="<?php echo esc_attr($edit_apt->base_price); ?>" required></td>
+                            </tr>
+                        </table>
+                        <div class="paguro-pricing-tools" style="margin: 10px 0 18px;">
+                            <div style="margin-bottom:10px;">
+                                <strong>Copia prezzo per mese</strong><br>
+                                <label for="paguro-copy-month" class="screen-reader-text">Mese</label>
+                                <select id="paguro-copy-month" style="margin-right:6px;">
+                                    <?php foreach ($month_names as $m_key => $m_label) { ?>
+                                        <option value="<?php echo esc_attr($m_key); ?>"><?php echo esc_html($m_label); ?></option>
+                                    <?php } ?>
+                                </select>
+                                <label for="paguro-copy-month-price" class="screen-reader-text">Prezzo</label>
+                                <input type="number" id="paguro-copy-month-price" step="0.01" min="0" placeholder="Prezzo €" style="max-width:140px; margin-right:6px;">
+                                <button type="button" class="button" id="paguro-copy-month-btn">Copia mese</button>
+                            </div>
+                            <div>
+                                <strong>Copia prezzi dall'altro appartamento</strong><br>
+                                <label for="paguro-copy-apt" class="screen-reader-text">Appartamento</label>
+                                <select id="paguro-copy-apt" style="margin-right:6px;">
+                                    <option value="">Seleziona...</option>
+                                    <?php foreach ($all_apts as $apt_item) {
+                                        if ($apt_item->id == $edit_apt->id) continue;
+                                        ?>
+                                        <option value="<?php echo esc_attr($apt_item->id); ?>"><?php echo esc_html($apt_item->name); ?></option>
+                                    <?php } ?>
+                                </select>
+                                <label style="margin-right:6px;">
+                                    <input type="checkbox" id="paguro-copy-apt-base" checked> Copia anche prezzo base
+                                </label>
+                                <button type="button" class="button" id="paguro-copy-apt-btn">Copia appartamento</button>
+                            </div>
+                        </div>
+                        <h4>Prezzi settimanali (sab-sab)</h4>
+                        <table class="widefat striped">
+                            <thead>
+                                <tr>
+                                    <th>Settimana</th>
+                                    <th>Prezzo (€)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php
+                                $cur = clone $season_start_dt;
+                                while ($cur < $season_end_dt) {
+                                    $week_end = (clone $cur)->modify('+1 week');
+                                    if ($week_end > $season_end_dt) break;
+                                    $week_key = $cur->format('Y-m-d');
+                                    $label = $cur->format('d/m/Y') . ' - ' . $week_end->format('d/m/Y');
+                                    $value = isset($edit_prices[$week_key]) ? $edit_prices[$week_key] : '';
+                                    ?>
+                                    <tr>
+                                        <td><?php echo esc_html($label); ?></td>
+                                        <td>
+                                            <input type="number" name="pricing_week[<?php echo esc_attr($week_key); ?>]" step="0.01" min="0" value="<?php echo esc_attr($value); ?>" style="max-width: 160px;">
+                                        </td>
+                                    </tr>
+                                    <?php
+                                    $cur->modify('+1 week');
+                                }
+                                ?>
+                            </tbody>
+                        </table>
+                        <p class="description">Lascia vuoto per usare il prezzo base settimanale.</p>
+                        <p>
+                            <button type="submit" name="paguro_apt_action" value="update_apt" class="button button-primary">Aggiorna</button>
+                            <a href="<?php echo esc_url($apt_cancel_url); ?>" class="button">Annulla</a>
+                        </p>
+                    </form>
+                </div>
+            <?php } ?>
 
             <div class="card">
                 <h3>➕ Aggiungi Appartamento</h3>
@@ -842,7 +1457,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                             <td><input type="text" name="apt_name" required></td>
                         </tr>
                         <tr>
-                            <th>Prezzo Base (€/notte)</th>
+                            <th>Prezzo Base (€/settimana)</th>
                             <td><input type="number" name="apt_price" step="0.01" min="0" required></td>
                         </tr>
                     </table>
@@ -858,14 +1473,13 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                     <tr>
                         <th>ID</th>
                         <th>Nome</th>
-                        <th>Prezzo Base</th>
+                        <th>Prezzo Base (€/settimana)</th>
                         <th width="150">Azioni</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php 
-                    $apts = $wpdb->get_results("SELECT * FROM $table_apt ORDER BY name");
-                    foreach ($apts as $apt) {
+                    foreach ($all_apts as $apt) {
                         ?>
                         <tr>
                             <td><?php echo $apt->id; ?></td>
@@ -875,6 +1489,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                 <form method="POST" style="display: inline;">
                                     <?php wp_nonce_field('paguro_apt_nonce'); ?>
                                     <input type="hidden" name="apt_id" value="<?php echo $apt->id; ?>">
+                                    <a href="<?php echo esc_url(add_query_arg(['tab' => 'apartments', 'edit_apt' => $apt->id])); ?>" class="button button-small">Modifica</a>
                                     <button type="submit" name="paguro_apt_action" value="delete_apt" class="button button-small button-link-delete paguro-admin-confirm" data-confirm="Eliminare?">Elimina</button>
                                 </form>
                             </td>
@@ -884,6 +1499,68 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                     ?>
                 </tbody>
             </table>
+
+            <?php if ($edit_apt) { ?>
+                <script>
+                window.paguroAptPricing = <?php echo wp_json_encode($apt_pricing_map); ?>;
+                document.addEventListener('DOMContentLoaded', function () {
+                    var monthBtn = document.getElementById('paguro-copy-month-btn');
+                    var monthSelect = document.getElementById('paguro-copy-month');
+                    var monthPrice = document.getElementById('paguro-copy-month-price');
+                    var aptBtn = document.getElementById('paguro-copy-apt-btn');
+                    var aptSelect = document.getElementById('paguro-copy-apt');
+                    var aptBase = document.getElementById('paguro-copy-apt-base');
+                    var baseInput = document.querySelector('input[name="apt_price"]');
+
+                    function getWeekInputs() {
+                        return Array.prototype.slice.call(document.querySelectorAll('input[name^="pricing_week["]'));
+                    }
+
+                    if (monthBtn) {
+                        monthBtn.addEventListener('click', function () {
+                            var month = monthSelect ? monthSelect.value : '';
+                            var price = monthPrice ? monthPrice.value : '';
+                            if (!month || !price) {
+                                alert('Seleziona un mese e inserisci un prezzo.');
+                                return;
+                            }
+                            getWeekInputs().forEach(function (input) {
+                                var match = input.name.match(/pricing_week\\[(\\d{4}-\\d{2}-\\d{2})\\]/);
+                                if (!match) return;
+                                var date = match[1];
+                                if (date.substring(5, 7) === month) {
+                                    input.value = price;
+                                }
+                            });
+                        });
+                    }
+
+                    if (aptBtn) {
+                        aptBtn.addEventListener('click', function () {
+                            var aptId = aptSelect ? aptSelect.value : '';
+                            if (!aptId) {
+                                alert('Seleziona un appartamento da cui copiare i prezzi.');
+                                return;
+                            }
+                            var data = window.paguroAptPricing ? window.paguroAptPricing[aptId] : null;
+                            if (!data) return;
+                            var pricing = data.pricing || {};
+                            getWeekInputs().forEach(function (input) {
+                                var match = input.name.match(/pricing_week\\[(\\d{4}-\\d{2}-\\d{2})\\]/);
+                                if (!match) return;
+                                var date = match[1];
+                                input.value = pricing.hasOwnProperty(date) ? pricing[date] : '';
+                            });
+                            if (aptBase && aptBase.checked && baseInput) {
+                                baseInput.value = data.base_price || '';
+                            }
+                        });
+                    }
+                });
+                </script>
+            <?php } ?>
+
+
 
         <?php } ?>
 
@@ -1228,9 +1905,9 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                             </td>
                         </tr>
                         <tr>
-                            <th>Testo Bottone Chat</th>
+                            <th>Testo Bottone Chat (singola settimana)</th>
                             <td>
-                                <input type="text" name="ui_btn_book" value="<?php echo esc_attr(get_option('paguro_js_btn_book', '[Richiedi Preventivo]')); ?>" style="width:100%; max-width: 400px;">
+                                <input type="text" name="ui_btn_book" value="<?php echo esc_attr(get_option('paguro_js_btn_book', '[Richiedi solo questa settimana]')); ?>" style="width:100%; max-width: 400px;">
                             </td>
                         </tr>
                         <tr>
@@ -1676,6 +2353,12 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                             </td>
                         </tr>
                         <tr>
+                            <th>Conferma Apertura Settimana (Multi)</th>
+                            <td>
+                                <textarea name="ui_group_week_confirm" rows="3" style="width:100%; max-width: 900px;"><?php echo esc_textarea(get_option('paguro_msg_ui_group_week_confirm', 'Attenzione: se annulli una settimana, il preventivo verrà ricalcolato e lo sconto multi‑settimana non sarà applicato.')); ?></textarea>
+                            </td>
+                        </tr>
+                        <tr>
                             <th>Bottone Cancella Prenotazione</th>
                             <td>
                                 <input type="text" name="ui_cancel_cta" value="<?php echo esc_attr(get_option('paguro_msg_ui_cancel_cta', 'Richiedi cancellazione')); ?>" style="width:100%; max-width: 400px;">
@@ -1791,6 +2474,17 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                         <th>% Acconto</th>
                         <td>
                             <input type="number" name="deposit_percent" value="<?php echo esc_attr(get_option('paguro_deposit_percent', 30)); ?>" min="1" max="100"> %
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Sconto Multi‑Settimana</th>
+                        <td>
+                            <?php
+                            $discount_raw = get_option('paguro_group_discount_map', '');
+                            $discount_fmt = function_exists('paguro_format_group_discount_map') ? paguro_format_group_discount_map($discount_raw) : $discount_raw;
+                            ?>
+                            <input type="text" name="group_discount_map" value="<?php echo esc_attr($discount_fmt); ?>" style="width: 100%; max-width: 400px;">
+                            <p class="description">Formato: <code>2=50, 3=120, 4=200</code> (importo in €). Si applica se settimane ≥ 2.</p>
                         </td>
                     </tr>
                     <tr>
@@ -1987,6 +2681,32 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
 .paguro-admin .paguro-badge--red { background: #ffd6d6; color: #7a0000; border-color: #f0a0a0; }
 .paguro-admin .paguro-badge--gray { background: #eef1f4; color: #505a64; border-color: #d6dde5; }
 .paguro-admin .paguro-badge--blue { background: #dbeafe; color: #1e3a8a; border-color: #bfdbfe; }
+.paguro-finance-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin: 12px 0 18px;
+}
+.paguro-finance-card {
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    border-radius: 8px;
+    padding: 12px 14px;
+}
+.paguro-finance-card .label {
+    display: block;
+    font-size: 12px;
+    color: #667085;
+    margin-bottom: 6px;
+}
+.paguro-finance-card .value {
+    font-size: 16px;
+    color: #111827;
+}
+.paguro-finance-table td,
+.paguro-finance-table th {
+    vertical-align: top;
+}
 .paguro-admin .paguro-ai-rule {
     margin: 16px 0;
     padding: 12px;
@@ -2014,6 +2734,16 @@ document.addEventListener('DOMContentLoaded', function () {
         var isCollapsed = body.classList.toggle('is-collapsed');
         toggleBtn.setAttribute('aria-expanded', (!isCollapsed).toString());
         toggleBtn.textContent = isCollapsed ? 'Apri' : 'Chiudi';
+    });
+
+    document.querySelectorAll('.paguro-group-toggle').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var group = btn.getAttribute('data-group');
+            if (!group) return;
+            document.querySelectorAll('.paguro-group-child[data-group="' + group + '"]').forEach(function(row) {
+                row.style.display = (row.style.display === 'none' || row.style.display === '') ? 'table-row' : 'none';
+            });
+        });
     });
 });
 </script>

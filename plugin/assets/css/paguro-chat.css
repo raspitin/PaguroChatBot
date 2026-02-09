@@ -394,6 +394,74 @@
     background: #218838;
 }
 
+.paguro-week-toggle {
+    background: #fff;
+    color: var(--paguro-primary);
+    border: 1px solid var(--paguro-primary);
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    text-decoration: none;
+    display: inline-block;
+    margin-left: 5px;
+    transition: background 0.2s, color 0.2s;
+}
+
+.paguro-week-toggle.is-selected {
+    background: var(--paguro-primary);
+    color: #fff !important;
+    border-color: var(--paguro-primary);
+    font-weight: 600;
+}
+
+.paguro-multi-panel {
+    border: 1px dashed var(--paguro-border);
+    background: #fff;
+    border-radius: 8px;
+    padding: 10px;
+}
+
+.paguro-multi-title {
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.paguro-multi-selected {
+    font-size: 12px;
+    color: #555;
+}
+
+.paguro-multi-selected ul {
+    margin: 6px 0 0 18px;
+}
+
+.paguro-multi-confirm {
+    display: inline-block;
+    margin-top: 8px;
+    background: var(--paguro-primary);
+    color: #fff !important;
+    padding: 6px 10px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 12px;
+}
+
+.paguro-multi-confirm.is-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.paguro-multi-suggestions {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #333;
+}
+
+.paguro-multi-suggestion-item {
+    margin-top: 6px;
+}
+
 .paguro-availability-line {
     display: inline-flex;
     align-items: center;

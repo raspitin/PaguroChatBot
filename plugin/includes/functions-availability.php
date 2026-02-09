@@ -81,6 +81,181 @@ function paguro_get_booking_with_apartment($token) {
 }
 
 // =========================================================
+// GROUP BOOKINGS
+// =========================================================
+
+function paguro_get_group_bookings($group_id) {
+    global $wpdb;
+    $table = $wpdb->prefix . 'paguro_availability';
+    if (!$group_id) return [];
+    return $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM $table WHERE group_id = %s ORDER BY date_start ASC",
+        $group_id
+    ));
+}
+
+function paguro_get_group_bookings_with_apartment($group_id) {
+    global $wpdb;
+    $table_b = $wpdb->prefix . 'paguro_availability';
+    $table_a = $wpdb->prefix . 'paguro_apartments';
+    if (!$group_id) return [];
+    return $wpdb->get_results($wpdb->prepare(
+        "SELECT b.*, a.name as apt_name, a.base_price FROM $table_b b
+         JOIN $table_a a ON b.apartment_id = a.id
+         WHERE b.group_id = %s
+         ORDER BY b.date_start ASC",
+        $group_id
+    ));
+}
+
+function paguro_parse_group_discount_map($raw) {
+    if (is_array($raw)) {
+        $map = [];
+        foreach ($raw as $k => $v) {
+            $key = intval($k);
+            $val = floatval($v);
+            if ($key > 0 && $val >= 0) $map[$key] = $val;
+        }
+        ksort($map);
+        return $map;
+    }
+    $raw = trim((string) $raw);
+    if ($raw === '') return [];
+    $pairs = preg_split('/[,\n;]+/', $raw);
+    $map = [];
+    foreach ($pairs as $pair) {
+        $pair = trim($pair);
+        if ($pair === '') continue;
+        if (!preg_match('/^(\d+)\s*=\s*([0-9]+(?:[.,][0-9]+)?)$/', $pair, $m)) continue;
+        $key = intval($m[1]);
+        $val = floatval(str_replace(',', '.', $m[2]));
+        if ($key > 0 && $val >= 0) $map[$key] = $val;
+    }
+    ksort($map);
+    return $map;
+}
+
+function paguro_format_group_discount_map($map) {
+    $parsed = paguro_parse_group_discount_map($map);
+    if (!$parsed) return '';
+    $parts = [];
+    foreach ($parsed as $k => $v) {
+        $parts[] = $k . '=' . rtrim(rtrim(number_format($v, 2, '.', ''), '0'), '.');
+    }
+    return implode(', ', $parts);
+}
+
+function paguro_get_group_discount_for_count($count) {
+    $count = intval($count);
+    if ($count < 2) return 0;
+    $map = paguro_parse_group_discount_map(get_option('paguro_group_discount_map', ''));
+    return isset($map[$count]) ? floatval($map[$count]) : 0;
+}
+
+function paguro_calculate_group_totals($group_id, $bookings = null) {
+    if ($bookings === null) {
+        $bookings = paguro_get_group_bookings_with_apartment($group_id);
+    }
+    if (!$bookings) {
+        return [
+            'weeks' => [],
+            'weeks_count' => 0,
+            'total_raw' => 0,
+            'discount' => 0,
+            'total_final' => 0,
+            'deposit' => 0,
+            'remaining' => 0
+        ];
+    }
+    $total_raw = 0;
+    $weeks = [];
+    foreach ($bookings as $b) {
+        if (isset($b->status) && intval($b->status) === 3) {
+            continue;
+        }
+        $price = function_exists('paguro_calculate_quote')
+            ? paguro_calculate_quote($b->apartment_id, $b->date_start, $b->date_end)
+            : 0;
+        $weeks[] = [
+            'date_start' => $b->date_start,
+            'date_end' => $b->date_end,
+            'price' => $price,
+            'booking' => $b
+        ];
+        $total_raw += $price;
+    }
+    $weeks_count = count($weeks);
+    $discount = paguro_get_group_discount_for_count($weeks_count);
+    $total_final = max(0, $total_raw - $discount);
+    $deposit_percent = intval(get_option('paguro_deposit_percent', 30));
+    $deposit = $total_final > 0 ? ceil($total_final * ($deposit_percent / 100)) : 0;
+    $remaining = $total_final - $deposit;
+
+    return [
+        'weeks' => $weeks,
+        'weeks_count' => $weeks_count,
+        'total_raw' => $total_raw,
+        'discount' => $discount,
+        'total_final' => $total_final,
+        'deposit' => $deposit,
+        'remaining' => $remaining
+    ];
+}
+
+if (!function_exists('paguro_maybe_update_group_quote_after_cancel')) {
+    function paguro_maybe_update_group_quote_after_cancel($group_id) {
+        $group_id = (string) $group_id;
+        if ($group_id === '') return false;
+        if (!function_exists('paguro_get_group_bookings')) return false;
+        $bookings = paguro_get_group_bookings($group_id);
+        if (!$bookings) return false;
+
+        $active = [];
+        foreach ($bookings as $b) {
+            if (intval($b->status) !== 3) {
+                $active[] = $b;
+            }
+        }
+        if (count($active) !== 1) return false;
+        $remaining = $active[0];
+        if (intval($remaining->status) !== 2) return false;
+
+        $sent_user = function_exists('paguro_send_group_quote_request_to_user')
+            ? paguro_send_group_quote_request_to_user($group_id)
+            : false;
+        $sent_admin = function_exists('paguro_send_group_quote_request_to_admin')
+            ? paguro_send_group_quote_request_to_admin($group_id)
+            : false;
+
+        if (function_exists('paguro_add_history')) {
+            paguro_add_history($remaining->id, 'GROUP_QUOTE_UPDATE', 'Preventivo aggiornato dopo cancellazione di una settimana');
+        }
+        return ($sent_user || $sent_admin);
+    }
+}
+
+function paguro_generate_unique_group_id() {
+    global $wpdb;
+    $max_attempts = 10;
+    $attempts = 0;
+    $table = $wpdb->prefix . 'paguro_availability';
+    do {
+        $token = bin2hex(random_bytes(32));
+        $exists = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $table WHERE lock_token = %s OR group_id = %s",
+            $token,
+            $token
+        ));
+        $attempts++;
+    } while ($exists > 0 && $attempts < $max_attempts);
+    if ($exists > 0) {
+        error_log('[Paguro] Failed to generate unique group id after ' . $max_attempts . ' attempts');
+        return false;
+    }
+    return $token;
+}
+
+// =========================================================
 // TOKEN GENERATION
 // =========================================================
 
@@ -270,6 +445,78 @@ function paguro_hard_lock_booking($booking_id, $receipt_url) {
     } catch (Exception $e) {
         $wpdb->query('ROLLBACK');
         error_log('[Paguro] Hard lock exception: ' . $e->getMessage());
+        return false;
+    }
+}
+
+function paguro_hard_lock_group($group_id, $receipt_url) {
+    global $wpdb;
+    $group_id = (string) $group_id;
+    if ($group_id === '') return false;
+
+    $wpdb->query('START TRANSACTION');
+    try {
+        $bookings = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM {$wpdb->prefix}paguro_availability WHERE group_id = %s ORDER BY date_start ASC FOR UPDATE",
+            $group_id
+        ));
+        if (!$bookings) {
+            $wpdb->query('ROLLBACK');
+            return false;
+        }
+
+        foreach ($bookings as $booking) {
+            if (!empty($booking->receipt_url)) {
+                continue;
+            }
+            $conflict = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}paguro_availability 
+                 WHERE apartment_id = %d 
+                 AND id != %d
+                 AND (status = 1 OR (status = 2 AND receipt_url IS NOT NULL))
+                 AND (date_start < %s AND date_end > %s)
+                 FOR UPDATE",
+                $booking->apartment_id,
+                $booking->id,
+                $booking->date_end,
+                $booking->date_start
+            ));
+            if ($conflict > 0) {
+                $wpdb->query('ROLLBACK');
+                return false;
+            }
+        }
+
+        foreach ($bookings as $booking) {
+            if (!empty($booking->receipt_url)) {
+                continue;
+            }
+            $history = paguro_get_history($booking->id);
+            $is_confirmed = false;
+            foreach ($history as $entry) {
+                if (!empty($entry['action']) && $entry['action'] === 'ADMIN_CONFIRM') {
+                    $is_confirmed = true;
+                    break;
+                }
+            }
+            $status = $is_confirmed ? 1 : 2;
+            $wpdb->update(
+                $wpdb->prefix . 'paguro_availability',
+                [
+                    'receipt_url' => $receipt_url,
+                    'receipt_uploaded_at' => current_time('mysql'),
+                    'status' => $status
+                ],
+                ['id' => $booking->id]
+            );
+            paguro_add_history($booking->id, 'HARD_LOCK', 'Receipt uploaded - In validation');
+        }
+
+        $wpdb->query('COMMIT');
+        return true;
+    } catch (Exception $e) {
+        $wpdb->query('ROLLBACK');
+        error_log('[Paguro] Hard lock group exception: ' . $e->getMessage());
         return false;
     }
 }

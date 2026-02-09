@@ -144,10 +144,11 @@ function paguro_create_tables()
         status tinyint(1) DEFAULT 0, guest_name varchar(100), guest_email varchar(100), guest_phone varchar(50), 
         customer_iban varchar(34),
         guest_notes text, history_log longtext,
-        lock_token varchar(64), lock_expires datetime, 
+        lock_token varchar(64), lock_expires datetime,
+        group_id varchar(64) NULL, group_seq int NULL,
         receipt_url varchar(255), receipt_uploaded_at datetime,
         created_at datetime DEFAULT CURRENT_TIMESTAMP, 
-        PRIMARY KEY (id), KEY apartment_id (apartment_id)
+        PRIMARY KEY (id), KEY apartment_id (apartment_id), KEY group_id (group_id)
     ) $charset;";
 
     require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
@@ -174,6 +175,19 @@ function paguro_maybe_upgrade_schema()
     if (!$col) {
         $wpdb->query("ALTER TABLE {$table} ADD customer_iban varchar(34) NULL");
     }
+    $group_col = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM {$table} LIKE %s", 'group_id'));
+    if (!$group_col) {
+        $wpdb->query("ALTER TABLE {$table} ADD group_id varchar(64) NULL");
+    }
+    $group_seq_col = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM {$table} LIKE %s", 'group_seq'));
+    if (!$group_seq_col) {
+        $wpdb->query("ALTER TABLE {$table} ADD group_seq int NULL");
+    }
+
+    $btn_label = get_option('paguro_js_btn_book', '');
+    if ($btn_label === '[Richiedi Preventivo]' || $btn_label === '') {
+        update_option('paguro_js_btn_book', '[Richiedi solo questa settimana]');
+    }
 }
 
 function paguro_set_defaults()
@@ -185,6 +199,7 @@ function paguro_set_defaults()
     add_option('paguro_season_start', '2026-06-01');
     add_option('paguro_season_end', '2026-09-30');
     add_option('paguro_deposit_percent', PAGURO_DEFAULT_DEPOSIT_PERCENT);
+    if (get_option('paguro_group_discount_map', null) === null) add_option('paguro_group_discount_map', '');
 
     add_option('paguro_bank_iban', 'IT00X0000000000000000000000');
     add_option('paguro_bank_owner', 'Chiara Maria Angela Celi');
@@ -195,12 +210,23 @@ function paguro_set_defaults()
 
     add_option('paguro_msg_ui_social_pressure', 'Altre {count} richieste attive per queste date.');
 
+    $btn_book_default = '[Richiedi solo questa settimana]';
+    $btn_book_current = get_option('paguro_js_btn_book', '');
+    if ($btn_book_current === '' || $btn_book_current === false) {
+        add_option('paguro_js_btn_book', $btn_book_default);
+    } elseif ($btn_book_current === '[Richiedi Preventivo]') {
+        update_option('paguro_js_btn_book', $btn_book_default);
+    }
+
     if (!get_option('paguro_msg_ui_summary_page')) add_option('paguro_msg_ui_summary_page', '<div>...</div>');
     if (!get_option('paguro_msg_ui_summary_confirm_page')) {
         $summary_confirm_default = '<p><strong>Prenotazione confermata.</strong></p>' .
             '<p>{apt_name} | {date_start} - {date_end}</p>' .
             '<p>Di seguito i dettagli di pagamento e la distinta (se presente).</p>';
         add_option('paguro_msg_ui_summary_confirm_page', $summary_confirm_default);
+    }
+    if (!get_option('paguro_msg_ui_group_week_confirm')) {
+        add_option('paguro_msg_ui_group_week_confirm', 'Attenzione: se annulli una settimana, il preventivo verrà ricalcolato e lo sconto multi‑settimana non sarà applicato.');
     }
     if (!get_option('paguro_msg_ui_login_page')) add_option('paguro_msg_ui_login_page', paguro_default_login_template());
     if (!get_option('paguro_msg_ui_privacy_notice')) add_option('paguro_msg_ui_privacy_notice', 'I tuoi dati saranno usati solo per la gestione del soggiorno.');
@@ -408,9 +434,9 @@ function paguro_sanitize_chat_reply($html)
         'ol' => [],
         'li' => [],
         'code' => [],
-        'div' => ['class' => true, 'style' => true],
-        'span' => ['class' => true, 'style' => true, 'data-apt' => true, 'data-in' => true, 'data-out' => true, 'data-offset' => true, 'data-month' => true],
-        'a' => ['href' => true, 'class' => true, 'data-apt' => true, 'data-in' => true, 'data-out' => true, 'data-offset' => true, 'data-month' => true],
+        'div' => ['class' => true, 'style' => true, 'data-apt' => true, 'data-group' => true],
+        'span' => ['class' => true, 'style' => true, 'data-apt' => true, 'data-in' => true, 'data-out' => true, 'data-offset' => true, 'data-month' => true, 'data-group' => true],
+        'a' => ['href' => true, 'class' => true, 'data-apt' => true, 'data-in' => true, 'data-out' => true, 'data-offset' => true, 'data-month' => true, 'data-group' => true],
     ];
     return wp_kses($html, $allowed);
 }
@@ -637,7 +663,7 @@ function paguro_enqueue_scripts() {
             'form_success' => 'Richiesta inviata!',
             'form_conn_error' => 'Errore connessione.',
             'btn_locking' => 'Attendere...',
-            'btn_book' => '[Richiedi Preventivo]',
+            'btn_book' => '[Richiedi solo questa settimana]',
             'token_missing' => get_option('paguro_msg_ui_missing_token', 'Codice di accesso mancante.'),
             'iban_required' => get_option('paguro_msg_ui_cancel_iban_required', 'Inserisci un IBAN valido.'),
             'iban_invalid' => get_option('paguro_msg_ui_cancel_iban_invalid', 'IBAN non valido.'),
@@ -721,6 +747,13 @@ function paguro_handle_post_actions()
         $token = sanitize_text_field(wp_unslash($_POST['token'] ?? ''));
         $email = sanitize_email(wp_unslash($_POST['verify_email'] ?? ''));
         $row = $wpdb->get_row($wpdb->prepare("SELECT id FROM {$wpdb->prefix}paguro_availability WHERE lock_token=%s AND guest_email=%s", $token, $email));
+        if (!$row) {
+            $row = $wpdb->get_row($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}paguro_availability WHERE group_id=%s AND guest_email=%s ORDER BY date_start ASC LIMIT 1",
+                $token,
+                $email
+            ));
+        }
         
         if ($row) {
             $cookie_val = wp_hash($token . 'paguro_auth');
@@ -760,6 +793,9 @@ function paguro_handle_post_actions()
 
             // IMPROVEMENT: Trigger waitlist alerts
             paguro_trigger_waitlist_alerts($booking->apartment_id, $booking->date_start, $booking->date_end);
+            if (!empty($booking->group_id) && function_exists('paguro_maybe_update_group_quote_after_cancel')) {
+                paguro_maybe_update_group_quote_after_cancel($booking->group_id);
+            }
             
             error_log('[Paguro] Admin refund: Booking ' . $booking->id . ' cancelled, waitlist alerted');
 
@@ -962,8 +998,15 @@ function paguro_handle_chat()
             }
             
             $html = ($offset == 0) ? "Ecco le disponibilità (Sab-Sab):<br><br>" : "";
+            if ($offset == 0) {
+                $html .= "<div class='paguro-multi-panel' data-group='multi'>" .
+                    "<div class='paguro-multi-title'>Seleziona più settimane</div>" .
+                    "<div class='paguro-multi-selected'>Nessuna settimana selezionata.</div>" .
+                    "<a href='#' class='paguro-multi-confirm'>Conferma settimane</a>" .
+                    "</div><br>";
+            }
             $found = false;
-            $txt_quote = get_option('paguro_js_btn_book', '[Richiedi Preventivo]');
+            $txt_quote = get_option('paguro_js_btn_book', '[Richiedi solo questa settimana]');
             $get_observers = function($apt_id, $date_end, $date_start) use ($wpdb) {
                 return (int) $wpdb->get_var($wpdb->prepare(
                     "SELECT COUNT(DISTINCT guest_email) FROM {$wpdb->prefix}paguro_availability
@@ -1049,7 +1092,9 @@ function paguro_handle_chat()
                             $apt_attr = esc_attr(strtolower($apt->name));
                             $d_in_attr = esc_attr($d_in);
                             $d_out_attr = esc_attr($d_out);
-                            $html .= "- {$dt->format('d/m')} - {$end->format('d/m')} <a href='#' class='paguro-book-btn' data-apt='{$apt_attr}' data-in='{$d_in_attr}' data-out='{$d_out_attr}'>" . esc_html($txt_quote) . "</a>{$social}<br>";
+                            $toggle_html = " <a href='#' class='paguro-week-toggle' data-apt='{$apt_attr}' data-in='{$d_in_attr}' data-out='{$d_out_attr}'>[Seleziona]</a>";
+                            $book_html = " <a href='#' class='paguro-book-btn' data-apt='{$apt_attr}' data-in='{$d_in_attr}' data-out='{$d_out_attr}'>" . esc_html($txt_quote) . "</a>";
+                            $html .= "- {$dt->format('d/m')} - {$end->format('d/m')}{$toggle_html}{$book_html}{$social}<br>";
                             $shown++;
                             $found = true;
                         } else {
@@ -1232,6 +1277,226 @@ function paguro_handle_lock()
         wp_send_json_error(['msg' => "Errore DB."]);
     }
 }
+
+// =========================================================
+// LOCK DATES (MULTI-WEEK GROUP)
+// =========================================================
+
+add_action('wp_ajax_paguro_lock_dates_multi', 'paguro_handle_lock_multi');
+add_action('wp_ajax_nopriv_paguro_lock_dates_multi', 'paguro_handle_lock_multi');
+function paguro_handle_lock_multi()
+{
+    if (!check_ajax_referer('paguro_chat_nonce', 'nonce', false)) {
+        wp_send_json_error(['msg' => "Sessione scaduta."]);
+    }
+
+    global $wpdb;
+
+    $recaptcha_token = sanitize_text_field(wp_unslash($_POST['recaptcha_token'] ?? ''));
+    $recaptcha_check = paguro_verify_recaptcha($recaptcha_token, 'paguro_lock_multi');
+    if (is_wp_error($recaptcha_check)) {
+        wp_send_json_error(['msg' => $recaptcha_check->get_error_message()]);
+    }
+
+    $apt_name = sanitize_text_field(wp_unslash($_POST['apt_name'] ?? ''));
+    $apt_id = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$wpdb->prefix}paguro_apartments WHERE name LIKE %s", $apt_name));
+    $dates_raw = wp_unslash($_POST['dates'] ?? '');
+    $dates = json_decode($dates_raw, true);
+
+    if (!$apt_id || !is_array($dates) || empty($dates)) {
+        wp_send_json_error(['msg' => 'Dati non validi.']);
+    }
+
+    $slots = [];
+    $seen = [];
+    foreach ($dates as $entry) {
+        $in_raw = sanitize_text_field($entry['in'] ?? '');
+        $out_raw = sanitize_text_field($entry['out'] ?? '');
+        $d_in_obj = DateTime::createFromFormat('d/m/Y', $in_raw);
+        $d_out_obj = DateTime::createFromFormat('d/m/Y', $out_raw);
+        if (!$d_in_obj || !$d_out_obj) {
+            wp_send_json_error(['msg' => 'Intervallo date non valido.']);
+        }
+        $d_in = $d_in_obj->format('Y-m-d');
+        $d_out = $d_out_obj->format('Y-m-d');
+        if ($d_in >= $d_out) {
+            wp_send_json_error(['msg' => 'Intervallo date non valido.']);
+        }
+        $key = $d_in . '|' . $d_out;
+        if (isset($seen[$key])) {
+            continue;
+        }
+        $seen[$key] = true;
+        $slots[] = [
+            'in_raw' => $in_raw,
+            'out_raw' => $out_raw,
+            'in' => $d_in,
+            'out' => $d_out
+        ];
+    }
+
+    if (empty($slots)) {
+        wp_send_json_error(['msg' => 'Nessuna settimana selezionata.']);
+    }
+
+    usort($slots, function($a, $b) {
+        return strcmp($a['in'], $b['in']);
+    });
+
+    $wpdb->query('START TRANSACTION');
+    try {
+        // Cleanup expired quotes
+        $wpdb->query(
+            "DELETE FROM {$wpdb->prefix}paguro_availability 
+             WHERE status=2 AND receipt_url IS NULL 
+             AND ((lock_expires IS NOT NULL AND lock_expires < NOW()) 
+                  OR (lock_expires IS NULL AND created_at < DATE_SUB(NOW(), INTERVAL " . PAGURO_SOFT_LOCK_HOURS . " HOUR)))"
+        );
+
+        $unavailable = [];
+        foreach ($slots as $slot) {
+            $busy = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}paguro_availability 
+                 WHERE apartment_id=%d 
+                 AND (status=1 OR status=5 OR (status=2 AND receipt_url IS NOT NULL)) 
+                 AND (date_start<%s AND date_end>%s) 
+                 FOR UPDATE", 
+                $apt_id, $slot['out'], $slot['in']
+            ));
+            if ($busy) {
+                $unavailable[] = $slot;
+            }
+        }
+
+        if (!empty($unavailable)) {
+            $wpdb->query('ROLLBACK');
+            $suggestions = paguro_multi_find_alternatives($apt_id, $unavailable, 2);
+            $suggestions_html = paguro_multi_build_suggestions_html($apt_name, $unavailable, $suggestions);
+            $suggestions_html = paguro_sanitize_chat_reply($suggestions_html);
+            wp_send_json_error([
+                'msg' => 'Alcune settimane non sono più disponibili. Scegli un’alternativa solo per quelle non disponibili.',
+                'unavailable' => $unavailable,
+                'suggestions_html' => $suggestions_html
+            ]);
+        }
+
+        $group_id = function_exists('paguro_generate_unique_group_id') ? paguro_generate_unique_group_id() : false;
+        if (!$group_id) {
+            $wpdb->query('ROLLBACK');
+            wp_send_json_error(['msg' => 'Errore interno.']);
+        }
+
+        $lock_expires = date('Y-m-d H:i:s', time() + (PAGURO_SOFT_LOCK_HOURS * 3600));
+        $seq = 1;
+        foreach ($slots as $slot) {
+            $token = paguro_generate_unique_token();
+            if (!$token) {
+                $wpdb->query('ROLLBACK');
+                wp_send_json_error(['msg' => 'Errore interno.']);
+            }
+            $wpdb->insert("{$wpdb->prefix}paguro_availability", [
+                'apartment_id' => $apt_id,
+                'date_start' => $slot['in'],
+                'date_end' => $slot['out'],
+                'status' => 2,
+                'lock_token' => $token,
+                'lock_expires' => $lock_expires,
+                'group_id' => $group_id,
+                'group_seq' => $seq,
+                'created_at' => current_time('mysql')
+            ]);
+            $seq++;
+        }
+
+        $wpdb->query('COMMIT');
+
+        $booking_slug = get_option('paguro_checkout_slug', 'prenotazione');
+        $redirect_params = "?token={$group_id}&multi=1";
+        $redirect_url = site_url("/{$booking_slug}/") . $redirect_params;
+
+        wp_send_json_success([
+            'group_id' => $group_id,
+            'redirect_params' => $redirect_params,
+            'redirect_url' => $redirect_url
+        ]);
+    } catch (Exception $e) {
+        $wpdb->query('ROLLBACK');
+        error_log('[Paguro] Multi lock exception: ' . $e->getMessage());
+        wp_send_json_error(['msg' => "Errore DB."]);
+    }
+}
+
+function paguro_multi_find_alternatives($apt_id, $unavailable, $limit = 2) {
+    global $wpdb;
+    $results = [];
+    if (!$unavailable) return $results;
+    $season_start = get_option('paguro_season_start');
+    $season_end = get_option('paguro_season_end');
+    $s_start = new DateTime($season_start);
+    $s_end = new DateTime($season_end);
+    if ($s_start->format('N') != 6) {
+        $s_start->modify('next saturday');
+    }
+
+    foreach ($unavailable as $slot) {
+        $d_in = new DateTime($slot['in']);
+        $d_out = new DateTime($slot['out']);
+        $weeks = max(1, intval($d_in->diff($d_out)->days / 7));
+        $alts = [];
+
+        $period = new DatePeriod($s_start, new DateInterval('P1W'), $s_end);
+        foreach ($period as $dt) {
+            if ($dt < $d_in) continue;
+            $end = clone $dt;
+            $end->modify('+' . $weeks . ' week');
+            if ($end > $s_end) continue;
+            $busy = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}paguro_availability 
+                 WHERE apartment_id=%d 
+                 AND (status=1 OR status=5 OR (status=2 AND receipt_url IS NOT NULL)) 
+                 AND (date_start<%s AND date_end>%s)",
+                $apt_id,
+                $end->format('Y-m-d'),
+                $dt->format('Y-m-d')
+            ));
+            if (!$busy) {
+                $alts[] = [
+                    'in' => $dt->format('d/m/Y'),
+                    'out' => $end->format('d/m/Y')
+                ];
+                if (count($alts) >= $limit) break;
+            }
+        }
+        $results[] = [
+            'original' => $slot,
+            'alternatives' => $alts
+        ];
+    }
+    return $results;
+}
+
+function paguro_multi_build_suggestions_html($apt_name, $unavailable, $suggestions) {
+    if (empty($suggestions)) return '';
+    $apt_attr = esc_attr(strtolower($apt_name));
+    $html = "<div class='paguro-multi-suggestions'><strong>Alternative disponibili:</strong><br>";
+    foreach ($suggestions as $entry) {
+        $orig = $entry['original'];
+        $label = esc_html($orig['in_raw'] . ' - ' . $orig['out_raw']);
+        $html .= "<div class='paguro-multi-suggestion-item'>Per {$label}: ";
+        if (empty($entry['alternatives'])) {
+            $html .= "<em>Nessuna alternativa trovata</em>";
+        } else {
+            foreach ($entry['alternatives'] as $alt) {
+                $in_attr = esc_attr($alt['in']);
+                $out_attr = esc_attr($alt['out']);
+                $html .= " <a href='#' class='paguro-week-toggle' data-apt='{$apt_attr}' data-in='{$in_attr}' data-out='{$out_attr}'>[{$in_attr} - {$out_attr}]</a>";
+            }
+        }
+        $html .= "</div>";
+    }
+    $html .= "</div>";
+    return $html;
+}
 // CONTINUATION OF paguro-chatbot.php - PART 3
 
 // =========================================================
@@ -1272,9 +1537,47 @@ function paguro_submit_booking()
         "SELECT * FROM {$wpdb->prefix}paguro_availability WHERE lock_token = %s", 
         $token
     ));
-    
+
     if (!$booking) {
-        wp_send_json_error(['msg' => 'Prenotazione non trovata.']);
+        // Try group
+        $group_bookings = function_exists('paguro_get_group_bookings') ? paguro_get_group_bookings($token) : [];
+        if (empty($group_bookings)) {
+            wp_send_json_error(['msg' => 'Prenotazione non trovata.']);
+        }
+
+        $wpdb->update(
+            "{$wpdb->prefix}paguro_availability",
+            [
+                'guest_name' => $name,
+                'guest_email' => $email,
+                'guest_phone' => $phone,
+                'guest_notes' => $notes
+            ],
+            ['group_id' => $token]
+        );
+
+        // IMPROVEMENT: Use secure cookie
+        $cookie_val = wp_hash($token . 'paguro_auth');
+        paguro_set_auth_cookie('paguro_auth_' . $token, $cookie_val);
+
+        $link_riepilogo = site_url("/" . get_option('paguro_page_slug') . "/?token={$token}");
+
+        foreach ($group_bookings as $b) {
+            paguro_add_history($b->id, 'QUOTE_REQ', "Preventivo richiesto (multi)");
+        }
+
+        if (function_exists('paguro_send_group_quote_request_to_user')) {
+            paguro_send_group_quote_request_to_user($token);
+        } elseif (function_exists('paguro_send_quote_request_to_user')) {
+            paguro_send_quote_request_to_user($group_bookings[0]->id);
+        }
+        if (function_exists('paguro_send_group_quote_request_to_admin')) {
+            paguro_send_group_quote_request_to_admin($token);
+        } elseif (function_exists('paguro_send_quote_request_to_admin')) {
+            paguro_send_quote_request_to_admin($group_bookings[0]->id);
+        }
+
+        wp_send_json_success(['redirect' => $link_riepilogo]);
     }
 
     // IMPROVEMENT: Use secure cookie
@@ -1366,7 +1669,27 @@ function paguro_handle_receipt_upload()
     ));
     
     if (!$booking) {
-        wp_send_json_error(['msg' => 'Prenotazione non trovata.']);
+        $group_bookings = function_exists('paguro_get_group_bookings') ? paguro_get_group_bookings($token) : [];
+        if (!$group_bookings) {
+            wp_send_json_error(['msg' => 'Prenotazione non trovata.']);
+        }
+        $success = function_exists('paguro_hard_lock_group') ? paguro_hard_lock_group($token, $uploaded['url']) : false;
+        if (!$success) {
+            wp_send_json_error([
+                'msg' => 'Ops! Qualcun altro ha prenotato le stesse date contemporaneamente. Ti contatteremo a breve per risolvere la situazione.'
+            ]);
+        }
+        if (function_exists('paguro_send_group_receipt_received_to_user')) {
+            paguro_send_group_receipt_received_to_user($token);
+        } elseif (function_exists('paguro_send_receipt_received_to_user')) {
+            paguro_send_receipt_received_to_user($group_bookings[0]->id);
+        }
+        if (function_exists('paguro_send_group_receipt_received_to_admin')) {
+            paguro_send_group_receipt_received_to_admin($token);
+        } elseif (function_exists('paguro_send_receipt_received_to_admin')) {
+            paguro_send_receipt_received_to_admin($group_bookings[0]->id);
+        }
+        wp_send_json_success(['url' => $uploaded['url']]);
     }
 
     // IMPROVEMENT: Hard lock with race condition protection
@@ -1404,10 +1727,21 @@ function paguro_checkout_form()
     $out = sanitize_text_field($_GET['out'] ?? '');
 
     global $wpdb;
-    $existing = $wpdb->get_var($wpdb->prepare(
-        "SELECT guest_email FROM {$wpdb->prefix}paguro_availability WHERE lock_token = %s", 
-        $token
-    ));
+    $group_bookings = [];
+    if ($token && function_exists('paguro_get_group_bookings_with_apartment')) {
+        $group_bookings = paguro_get_group_bookings_with_apartment($token);
+    }
+    if (!empty($group_bookings)) {
+        $existing = $wpdb->get_var($wpdb->prepare(
+            "SELECT guest_email FROM {$wpdb->prefix}paguro_availability WHERE group_id = %s AND guest_email <> '' LIMIT 1",
+            $token
+        ));
+    } else {
+        $existing = $wpdb->get_var($wpdb->prepare(
+            "SELECT guest_email FROM {$wpdb->prefix}paguro_availability WHERE lock_token = %s", 
+            $token
+        ));
+    }
     
     if ($existing) {
         $slug = get_option('paguro_page_slug', 'riepilogo-prenotazione');
@@ -1420,8 +1754,14 @@ function paguro_checkout_form()
         $intro = "Periodo al momento occupato. Lascia i tuoi dati e ti avviseremo se si libera.";
         $social_html = "";
     } else {
-        $title = "Richiesta preventivo: " . esc_html(ucfirst($apt));
-        $intro = "Completa i dati per ricevere il preventivo.";
+        if (!empty($group_bookings)) {
+            $apt_name = isset($group_bookings[0]->apt_name) ? $group_bookings[0]->apt_name : $apt;
+            $title = "Richiesta preventivo (più settimane): " . esc_html(ucfirst($apt_name));
+            $intro = "Completa i dati per ricevere il preventivo complessivo.";
+        } else {
+            $title = "Richiesta preventivo: " . esc_html(ucfirst($apt));
+            $intro = "Completa i dati per ricevere il preventivo.";
+        }
 
         $booking = $wpdb->get_row($wpdb->prepare(
             "SELECT * FROM {$wpdb->prefix}paguro_availability WHERE lock_token = %s", 
@@ -1453,7 +1793,18 @@ function paguro_checkout_form()
     ob_start(); ?>
     <div class="paguro-checkout-box" style="max-width:500px; margin:20px auto; padding:20px; border:1px solid #ddd; background:#fff;">
         <h3 style="text-align:center; margin-bottom:5px;"><?php echo $title; ?></h3>
-        <p style="text-align:center; color:#666; margin-bottom:20px;"><?php echo esc_html($in); ?> - <?php echo esc_html($out); ?></p>
+        <?php if (!empty($group_bookings)) { ?>
+            <div style="text-align:center; color:#666; margin-bottom:12px;">
+                <strong>Settimane selezionate:</strong>
+            </div>
+            <ul style="margin:0 0 18px 0; padding-left:18px; color:#555;">
+                <?php foreach ($group_bookings as $gb) { ?>
+                    <li><?php echo esc_html(date('d/m/Y', strtotime($gb->date_start)) . ' - ' . date('d/m/Y', strtotime($gb->date_end))); ?></li>
+                <?php } ?>
+            </ul>
+        <?php } else { ?>
+            <p style="text-align:center; color:#666; margin-bottom:20px;"><?php echo esc_html($in); ?> - <?php echo esc_html($out); ?></p>
+        <?php } ?>
 
         <p style="font-size:14px; margin-bottom:15px;"><?php echo esc_html($intro); ?></p>
         <?php echo $social_html; ?>
