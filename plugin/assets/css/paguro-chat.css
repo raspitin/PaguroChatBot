@@ -260,6 +260,10 @@
     text-decoration: underline;
 }
 
+.paguro-msg-bot .paguro-msg-content a {
+    color: var(--paguro-primary);
+}
+
 /* =========================================================
    QUICK BUTTONS (Months)
    ========================================================= */

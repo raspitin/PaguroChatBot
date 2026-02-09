@@ -31,6 +31,9 @@ if (isset($_POST['paguro_save_opts']) && check_admin_referer('paguro_admin_opts'
     update_option('paguro_api_url', esc_url_raw(wp_unslash($_POST['paguro_api_url'] ?? '')));
     update_option('paguro_recaptcha_site', sanitize_text_field(wp_unslash($_POST['recaptcha_site'] ?? '')));
     update_option('paguro_recaptcha_secret', sanitize_text_field(wp_unslash($_POST['recaptcha_secret'] ?? '')));
+    update_option('paguro_ai_provider', sanitize_text_field(wp_unslash($_POST['ai_provider'] ?? 'api')));
+    update_option('paguro_ollama_url', esc_url_raw(wp_unslash($_POST['ollama_url'] ?? '')));
+    update_option('paguro_ollama_model', sanitize_text_field(wp_unslash($_POST['ollama_model'] ?? '')));
 
     echo '<div class="notice notice-success is-dismissible"><p><strong>✓</strong> Configurazione Salvata.</p></div>';
 }
@@ -53,6 +56,12 @@ if (isset($_POST['paguro_save_emails']) && check_admin_referer('paguro_email_opt
     update_option('paguro_msg_email_adm_cancel_body', wp_kses_post(wp_unslash($_POST['email_cancel_adm_body'] ?? '')));
     update_option('paguro_msg_email_refund_subj', sanitize_text_field(wp_unslash($_POST['email_refund_subj'] ?? '')));
     update_option('paguro_msg_email_refund_body', wp_kses_post(wp_unslash($_POST['email_refund_body'] ?? '')));
+    update_option('paguro_txt_email_waitlist_subj', sanitize_text_field(wp_unslash($_POST['email_waitlist_subj'] ?? '')));
+    update_option('paguro_txt_email_waitlist_body', wp_kses_post(wp_unslash($_POST['email_waitlist_body'] ?? '')));
+    update_option('paguro_txt_email_waitlist_adm_subj', sanitize_text_field(wp_unslash($_POST['email_waitlist_adm_subj'] ?? '')));
+    update_option('paguro_txt_email_waitlist_adm_body', wp_kses_post(wp_unslash($_POST['email_waitlist_adm_body'] ?? '')));
+    update_option('paguro_txt_email_waitlist_alert_subj', sanitize_text_field(wp_unslash($_POST['email_waitlist_alert_subj'] ?? '')));
+    update_option('paguro_txt_email_waitlist_alert_body', wp_kses_post(wp_unslash($_POST['email_waitlist_alert_body'] ?? '')));
 
     echo '<div class="notice notice-success is-dismissible"><p><strong>✓</strong> Email Templates Salvati.</p></div>';
 }
@@ -66,8 +75,90 @@ if (isset($_POST['paguro_save_web_templates']) && check_admin_referer('paguro_we
     update_option('paguro_msg_ui_summary_confirm_page', wp_kses_post(wp_unslash($_POST['ui_summary_confirm_page'] ?? '')));
     update_option('paguro_msg_ui_login_page', wp_kses_post(wp_unslash($_POST['ui_login_page'] ?? '')));
     update_option('paguro_js_btn_book', sanitize_text_field(wp_unslash($_POST['ui_btn_book'] ?? '')));
+    update_option('paguro_msg_ui_summary_title', sanitize_text_field(wp_unslash($_POST['ui_summary_title'] ?? '')));
+    update_option('paguro_msg_ui_waitlist_title', sanitize_text_field(wp_unslash($_POST['ui_waitlist_title'] ?? '')));
+    update_option('paguro_msg_ui_quote_title', sanitize_text_field(wp_unslash($_POST['ui_quote_title'] ?? '')));
+    update_option('paguro_msg_ui_quote_subtitle', sanitize_text_field(wp_unslash($_POST['ui_quote_subtitle'] ?? '')));
+    update_option('paguro_msg_ui_quote_name_help', sanitize_text_field(wp_unslash($_POST['ui_quote_name_help'] ?? '')));
+    update_option('paguro_msg_ui_missing_token', sanitize_text_field(wp_unslash($_POST['ui_missing_token'] ?? '')));
+    update_option('paguro_msg_ui_auth_title', sanitize_text_field(wp_unslash($_POST['ui_auth_title'] ?? '')));
+    update_option('paguro_msg_ui_auth_help_quote', sanitize_textarea_field(wp_unslash($_POST['ui_auth_help_quote'] ?? '')));
+    update_option('paguro_msg_ui_auth_help_waitlist', sanitize_textarea_field(wp_unslash($_POST['ui_auth_help_waitlist'] ?? '')));
+    update_option('paguro_msg_ui_auth_email_label', sanitize_text_field(wp_unslash($_POST['ui_auth_email_label'] ?? '')));
+    update_option('paguro_msg_ui_auth_submit', sanitize_text_field(wp_unslash($_POST['ui_auth_submit'] ?? '')));
+    update_option('paguro_msg_ui_auth_error', sanitize_text_field(wp_unslash($_POST['ui_auth_error'] ?? '')));
+    update_option('paguro_msg_ui_booking_not_found', sanitize_text_field(wp_unslash($_POST['ui_booking_not_found'] ?? '')));
+    update_option('paguro_msg_ui_waitlist_not_found', sanitize_text_field(wp_unslash($_POST['ui_waitlist_not_found'] ?? '')));
+    update_option('paguro_msg_ui_cancel_requested', sanitize_text_field(wp_unslash($_POST['ui_cancel_requested'] ?? '')));
+    update_option('paguro_msg_ui_cancel_pending', sanitize_text_field(wp_unslash($_POST['ui_cancel_pending'] ?? '')));
+    update_option('paguro_msg_ui_cancel_iban_required', sanitize_text_field(wp_unslash($_POST['ui_cancel_iban_required'] ?? '')));
+    update_option('paguro_msg_ui_cancel_iban_invalid', sanitize_text_field(wp_unslash($_POST['ui_cancel_iban_invalid'] ?? '')));
+    update_option('paguro_msg_ui_cancel_denied', sanitize_textarea_field(wp_unslash($_POST['ui_cancel_denied'] ?? '')));
+    update_option('paguro_msg_ui_waitlist_cancelled', sanitize_text_field(wp_unslash($_POST['ui_waitlist_cancelled'] ?? '')));
+    update_option('paguro_msg_ui_waitlist_title_text', sanitize_text_field(wp_unslash($_POST['ui_waitlist_title_text'] ?? '')));
+    update_option('paguro_msg_ui_waitlist_inline_notice', sanitize_textarea_field(wp_unslash($_POST['ui_waitlist_inline_notice'] ?? '')));
+    update_option('paguro_msg_ui_waitlist_page_notice', sanitize_textarea_field(wp_unslash($_POST['ui_waitlist_page_notice'] ?? '')));
+    update_option('paguro_msg_ui_waitlist_inline_dates_label', sanitize_text_field(wp_unslash($_POST['ui_waitlist_inline_dates_label'] ?? '')));
+    update_option('paguro_msg_ui_section_booking', sanitize_text_field(wp_unslash($_POST['ui_section_booking'] ?? '')));
+    update_option('paguro_msg_ui_section_pricing', sanitize_text_field(wp_unslash($_POST['ui_section_pricing'] ?? '')));
+    update_option('paguro_msg_ui_section_payment', sanitize_text_field(wp_unslash($_POST['ui_section_payment'] ?? '')));
+    update_option('paguro_msg_ui_section_upload', sanitize_text_field(wp_unslash($_POST['ui_section_upload'] ?? '')));
+    update_option('paguro_msg_ui_section_uploaded', sanitize_text_field(wp_unslash($_POST['ui_section_uploaded'] ?? '')));
+    update_option('paguro_msg_ui_section_actions', sanitize_text_field(wp_unslash($_POST['ui_section_actions'] ?? '')));
+    update_option('paguro_msg_ui_label_guest', sanitize_text_field(wp_unslash($_POST['ui_label_guest'] ?? '')));
+    update_option('paguro_msg_ui_label_name', sanitize_text_field(wp_unslash($_POST['ui_label_name'] ?? '')));
+    update_option('paguro_msg_ui_label_email', sanitize_text_field(wp_unslash($_POST['ui_label_email'] ?? '')));
+    update_option('paguro_msg_ui_label_phone', sanitize_text_field(wp_unslash($_POST['ui_label_phone'] ?? '')));
+    update_option('paguro_msg_ui_label_apartment', sanitize_text_field(wp_unslash($_POST['ui_label_apartment'] ?? '')));
+    update_option('paguro_msg_ui_label_checkin', sanitize_text_field(wp_unslash($_POST['ui_label_checkin'] ?? '')));
+    update_option('paguro_msg_ui_label_checkout', sanitize_text_field(wp_unslash($_POST['ui_label_checkout'] ?? '')));
+    update_option('paguro_msg_ui_label_check_suffix', sanitize_text_field(wp_unslash($_POST['ui_label_check_suffix'] ?? '')));
+    update_option('paguro_msg_ui_label_total_cost', sanitize_text_field(wp_unslash($_POST['ui_label_total_cost'] ?? '')));
+    update_option('paguro_msg_ui_label_deposit', sanitize_text_field(wp_unslash($_POST['ui_label_deposit'] ?? '')));
+    update_option('paguro_msg_ui_label_remaining', sanitize_text_field(wp_unslash($_POST['ui_label_remaining'] ?? '')));
+    update_option('paguro_msg_ui_label_owner', sanitize_text_field(wp_unslash($_POST['ui_label_owner'] ?? '')));
+    update_option('paguro_msg_ui_label_iban', sanitize_text_field(wp_unslash($_POST['ui_label_iban'] ?? '')));
+    update_option('paguro_msg_ui_label_amount', sanitize_text_field(wp_unslash($_POST['ui_label_amount'] ?? '')));
+    update_option('paguro_msg_ui_upload_drop', sanitize_text_field(wp_unslash($_POST['ui_upload_drop'] ?? '')));
+    update_option('paguro_msg_ui_upload_success_title', sanitize_text_field(wp_unslash($_POST['ui_upload_success_title'] ?? '')));
+    update_option('paguro_msg_ui_upload_success_text', sanitize_textarea_field(wp_unslash($_POST['ui_upload_success_text'] ?? '')));
+    update_option('paguro_msg_ui_receipt_pending', sanitize_text_field(wp_unslash($_POST['ui_receipt_pending'] ?? '')));
+    update_option('paguro_msg_ui_receipt_uploaded_text', sanitize_textarea_field(wp_unslash($_POST['ui_receipt_uploaded_text'] ?? '')));
+    update_option('paguro_msg_ui_receipt_view_cta', sanitize_text_field(wp_unslash($_POST['ui_receipt_view_cta'] ?? '')));
+    update_option('paguro_msg_ui_cancel_label', sanitize_text_field(wp_unslash($_POST['ui_cancel_label'] ?? '')));
+    update_option('paguro_msg_ui_cancel_placeholder', sanitize_text_field(wp_unslash($_POST['ui_cancel_placeholder'] ?? '')));
+    update_option('paguro_msg_ui_cancel_help', wp_kses_post(wp_unslash($_POST['ui_cancel_help'] ?? '')));
+    update_option('paguro_msg_ui_cancel_confirm', sanitize_textarea_field(wp_unslash($_POST['ui_cancel_confirm'] ?? '')));
+    update_option('paguro_msg_ui_cancel_cta', sanitize_text_field(wp_unslash($_POST['ui_cancel_cta'] ?? '')));
+    update_option('paguro_msg_ui_cancel_deadline_note', sanitize_textarea_field(wp_unslash($_POST['ui_cancel_deadline_note'] ?? '')));
+    update_option('paguro_msg_ui_cancel_unavailable', wp_kses_post(wp_unslash($_POST['ui_cancel_unavailable'] ?? '')));
+    update_option('paguro_msg_ui_cancel_requested_notice', sanitize_textarea_field(wp_unslash($_POST['ui_cancel_requested_notice'] ?? '')));
+    update_option('paguro_msg_ui_waitlist_section_info', sanitize_text_field(wp_unslash($_POST['ui_waitlist_section_info'] ?? '')));
+    update_option('paguro_msg_ui_waitlist_section_dates', sanitize_text_field(wp_unslash($_POST['ui_waitlist_section_dates'] ?? '')));
+    update_option('paguro_msg_ui_waitlist_section_history', sanitize_text_field(wp_unslash($_POST['ui_waitlist_section_history'] ?? '')));
+    update_option('paguro_msg_ui_waitlist_exit_cta', sanitize_text_field(wp_unslash($_POST['ui_waitlist_exit_cta'] ?? '')));
+    update_option('paguro_msg_ui_waitlist_exit_confirm', sanitize_textarea_field(wp_unslash($_POST['ui_waitlist_exit_confirm'] ?? '')));
 
     echo '<div class="notice notice-success is-dismissible"><p><strong>✓</strong> Web Templates Salvati.</p></div>';
+}
+
+// ====== GESTIONE IA RULES ======
+if (isset($_POST['paguro_save_ai_rules']) && check_admin_referer('paguro_ai_rules')) {
+    $keywords = isset($_POST['ai_rule_keywords']) && is_array($_POST['ai_rule_keywords']) ? $_POST['ai_rule_keywords'] : [];
+    $responses = isset($_POST['ai_rule_response']) && is_array($_POST['ai_rule_response']) ? $_POST['ai_rule_response'] : [];
+    $rules = [];
+    $count = max(count($keywords), count($responses));
+    for ($i = 0; $i < $count; $i++) {
+        $kw = sanitize_text_field(wp_unslash($keywords[$i] ?? ''));
+        $resp = wp_kses_post(wp_unslash($responses[$i] ?? ''));
+        if ($kw === '' || $resp === '') continue;
+        $rules[] = [
+            'keywords' => $kw,
+            'response' => $resp
+        ];
+    }
+    update_option('paguro_ai_rules', $rules);
+    echo '<div class="notice notice-success is-dismissible"><p><strong>✓</strong> Regole IA Salvate.</p></div>';
 }
 
 // ====== GESTIONE APPARTAMENTI ======
@@ -303,29 +394,231 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
     <h1>📅 Paguro Booking - Amministrazione</h1>
 
     <script>
-        document.addEventListener('click', function(e) {
-            var btn = e.target.closest('.paguro-history-toggle');
-            if (!btn) return;
-            e.preventDefault();
-            var raw = btn.getAttribute('data-history') || '';
-            var logText = raw;
-            try {
-                raw = atob(raw);
-            } catch (err) {}
-            try {
-                var parsed = JSON.parse(raw);
-                if (Array.isArray(parsed)) {
-                    logText = parsed.map(function(entry) {
-                        var time = entry.time || '';
-                        var action = entry.action || '';
-                        var details = entry.details || '';
-                        return (time + ' - ' + action + (details ? ' - ' + details : '')).trim();
-                    }).join('\n');
+        (function() {
+            function ensureOverlay() {
+                var overlay = document.getElementById('paguro-admin-overlay');
+                if (overlay) return overlay;
+                overlay = document.createElement('div');
+                overlay.id = 'paguro-admin-overlay';
+                overlay.className = 'paguro-admin-overlay';
+                overlay.innerHTML = '' +
+                    '<div class=\"paguro-admin-overlay-backdrop\" aria-hidden=\"true\"></div>' +
+                    '<div class=\"paguro-admin-overlay-card\" role=\"dialog\" aria-modal=\"true\">' +
+                    '  <button type=\"button\" class=\"paguro-admin-overlay-close\" aria-label=\"Chiudi\">×</button>' +
+                    '  <div class=\"paguro-admin-overlay-content\"></div>' +
+                    '  <div class=\"paguro-admin-overlay-actions\"></div>' +
+                    '</div>';
+                document.body.appendChild(overlay);
+
+                overlay.addEventListener('click', function(evt) {
+                    if (evt.target.classList.contains('paguro-admin-overlay-backdrop') ||
+                        evt.target.classList.contains('paguro-admin-overlay-close')) {
+                        closeOverlay();
+                    }
+                });
+                document.addEventListener('keydown', function(evt) {
+                    if (evt.key === 'Escape' && overlay.classList.contains('is-open')) {
+                        closeOverlay();
+                    }
+                });
+                return overlay;
+            }
+
+            function openOverlay(contentHtml, actionsHtml) {
+                var overlay = ensureOverlay();
+                overlay.querySelector('.paguro-admin-overlay-content').innerHTML = contentHtml || '';
+                overlay.querySelector('.paguro-admin-overlay-actions').innerHTML = actionsHtml || '';
+                overlay.classList.add('is-open');
+            }
+
+            function closeOverlay() {
+                var overlay = document.getElementById('paguro-admin-overlay');
+                if (!overlay) return;
+                overlay.classList.remove('is-open');
+                overlay.querySelector('.paguro-admin-overlay-content').innerHTML = '';
+                overlay.querySelector('.paguro-admin-overlay-actions').innerHTML = '';
+            }
+
+            function openConfirm(message, onConfirm) {
+                var safe = (message || '').replace(/[&<>]/g, function(c) {
+                    return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+                }).replace(/\\n/g, '<br>');
+                var content = '<div style=\"line-height:1.5;\">' + safe + '</div>';
+                var actions = '' +
+                    '<button type=\"button\" class=\"button paguro-admin-confirm-cancel\">Annulla</button>' +
+                    '<button type=\"button\" class=\"button button-primary paguro-admin-confirm-ok\">Conferma</button>';
+                openOverlay(content, actions);
+                var overlay = document.getElementById('paguro-admin-overlay');
+                var okBtn = overlay.querySelector('.paguro-admin-confirm-ok');
+                var cancelBtn = overlay.querySelector('.paguro-admin-confirm-cancel');
+                okBtn.onclick = function() {
+                    closeOverlay();
+                    if (typeof onConfirm === 'function') onConfirm();
+                };
+                cancelBtn.onclick = function() {
+                    closeOverlay();
+                };
+            }
+
+            function showHistoryLog(btn) {
+                if (!btn) return false;
+                var raw = btn.getAttribute('data-history') || '';
+                var logText = raw;
+                try { raw = atob(raw); } catch (err) {}
+                if (typeof raw === 'string' && raw.indexOf('\\n') !== -1 && raw.indexOf('\n') === -1) {
+                    raw = raw.replace(/\\n/g, '\n');
                 }
-            } catch (err) {}
-            alert(logText || 'Nessun log disponibile');
-        });
+                try {
+                    var parsed = JSON.parse(raw);
+                    if (Array.isArray(parsed)) {
+                        logText = parsed.map(function(entry) {
+                            var time = entry.time || '';
+                            var action = entry.action || '';
+                            var details = entry.details || '';
+                            return (time + ' - ' + action + (details ? ' - ' + details : '')).trim() + '\n';
+                        }).join('');
+                    }
+                } catch (err) {}
+                var safe = (logText || 'Nessun log disponibile').replace(/[&<>]/g, function(c) {
+                    return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+                });
+                openOverlay('<pre style=\"white-space:pre-wrap; margin:0;\">' + safe + '</pre>');
+                return false;
+            }
+
+            function showReceipt(btn) {
+                if (!btn) return false;
+                var url = btn.getAttribute('data-receipt-url') || btn.getAttribute('href') || '';
+                if (!url) return false;
+                var safeUrl = url.replace(/\"/g, '&quot;');
+                openOverlay('<iframe src=\"' + safeUrl + '\" style=\"width:90vw; max-width:900px; height:75vh; border:0;\"></iframe>');
+                return false;
+            }
+
+            window.paguroAdminShowLog = showHistoryLog;
+            window.paguroAdminShowReceipt = showReceipt;
+
+            document.addEventListener('click', function(e) {
+                var target = e.target;
+                if (target && target.nodeType === 3) {
+                    target = target.parentElement;
+                }
+                if (!target || typeof target.closest !== 'function') return;
+                var btn = target.closest('.paguro-history-toggle');
+                if (btn) {
+                    e.preventDefault();
+                    showHistoryLog(btn);
+                    return;
+                }
+
+                var receipt = target.closest('.paguro-admin-receipt-link');
+                if (receipt) {
+                    e.preventDefault();
+                    showReceipt(receipt);
+                    return;
+                }
+
+                var confirmBtn = target.closest('.paguro-admin-confirm');
+                if (confirmBtn) {
+                    e.preventDefault();
+                    var msg = confirmBtn.getAttribute('data-confirm') || 'Confermi l\'azione?';
+                    openConfirm(msg, function() {
+                        var form = confirmBtn.closest('form');
+                        if (!form) return;
+                        var name = confirmBtn.getAttribute('name');
+                        var value = confirmBtn.getAttribute('value');
+                        if (name) {
+                            var hidden = form.querySelector('input[name=\"' + name + '\"]');
+                            if (!hidden) {
+                                hidden = document.createElement('input');
+                                hidden.type = 'hidden';
+                                hidden.name = name;
+                                form.appendChild(hidden);
+                            }
+                            hidden.value = value || '';
+                        }
+                        form.submit();
+                    });
+                }
+            });
+
+            document.addEventListener('DOMContentLoaded', function() {
+                function wrapSections(containerId) {
+                    var container = document.getElementById(containerId);
+                    if (!container) return;
+                    var headers = container.querySelectorAll('h3');
+                    headers.forEach(function(h3) {
+                        if (h3.closest('details')) return;
+                        var next = h3.nextElementSibling;
+                        if (!next) return;
+                        var details = document.createElement('details');
+                        details.className = 'paguro-details';
+                        var summary = document.createElement('summary');
+                        summary.textContent = h3.textContent;
+                        details.appendChild(summary);
+                        details.appendChild(next);
+                        h3.replaceWith(details);
+                    });
+                }
+                wrapSections('paguro-web-templates');
+                wrapSections('paguro-email-templates');
+            });
+        })();
     </script>
+
+    <style>
+        .paguro-admin-overlay {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        .paguro-admin-overlay.is-open { display: flex; }
+        .paguro-admin-overlay-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.55);
+        }
+        .paguro-admin-overlay-card {
+            position: relative;
+            z-index: 1;
+            background: #fff;
+            border-radius: 10px;
+            padding: 18px;
+            max-height: 85vh;
+            overflow: auto;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+        }
+        .paguro-admin-overlay-actions {
+            margin-top: 16px;
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+        .paguro-admin-overlay-close {
+            position: absolute;
+            right: 8px;
+            top: 6px;
+            border: none;
+            background: transparent;
+            font-size: 20px;
+            cursor: pointer;
+        }
+        .paguro-details {
+            margin: 10px 0 16px;
+            padding: 6px 0;
+        }
+        .paguro-details summary {
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 15px;
+        }
+        .paguro-details table {
+            margin-top: 10px;
+        }
+    </style>
 
     <nav class="nav-tab-wrapper">
         <a href="<?php echo add_query_arg('tab', 'bookings'); ?>" class="nav-tab <?php echo $current_tab === 'bookings' ? 'nav-tab-active' : ''; ?>">📋 Prenotazioni</a>
@@ -333,6 +626,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
         <a href="<?php echo add_query_arg('tab', 'emails'); ?>" class="nav-tab <?php echo $current_tab === 'emails' ? 'nav-tab-active' : ''; ?>">📧 Email Templates</a>
         <a href="<?php echo add_query_arg('tab', 'web_templates'); ?>" class="nav-tab <?php echo $current_tab === 'web_templates' ? 'nav-tab-active' : ''; ?>">🖥️ Web Templates</a>
         <a href="<?php echo add_query_arg('tab', 'settings'); ?>" class="nav-tab <?php echo $current_tab === 'settings' ? 'nav-tab-active' : ''; ?>">⚙️ Configurazione</a>
+        <a href="<?php echo add_query_arg('tab', 'ai'); ?>" class="nav-tab <?php echo $current_tab === 'ai' ? 'nav-tab-active' : ''; ?>">🤖 IA</a>
     </nav>
 
     <div class="tab-content">
@@ -481,7 +775,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                 $status_confirm = 'Confermare la cancellazione?';
                             }
                                 if ($status_action) {
-                                    $status_label = '<button type="submit" name="paguro_action" value="' . esc_attr($status_action) . '" class="button button-small" onclick="return confirm(&quot;' . esc_attr($status_confirm) . '&quot;)">' . esc_html($status_label) . '</button>';
+                                    $status_label = '<button type="submit" name="paguro_action" value="' . esc_attr($status_action) . '" class="button button-small paguro-admin-confirm" data-confirm="' . esc_attr($status_confirm) . '">' . esc_html($status_label) . '</button>';
                                 } else {
                                 $status_label = '<span class="paguro-badge ' . esc_attr($status_class) . '">' . esc_html($status_label) . '</span>';
                             }
@@ -501,14 +795,14 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                 </td>
                                 <td>
                                     <?php if (!empty($b->receipt_url)) { ?>
-                                        <a href="<?php echo esc_url($b->receipt_url); ?>" target="_blank" class="button button-small">Vedi</a>
+                                        <a href="#" data-receipt-url="<?php echo esc_url(paguro_get_admin_receipt_link($b->id, $b->receipt_url)); ?>" class="button button-small paguro-admin-receipt-link" onclick="return paguroAdminShowReceipt(this);">Vedi</a>
                                     <?php } else { ?>
                                         <span style="color:#999;">—</span>
                                     <?php } ?>
                                 </td>
                                 <td>
                                     <?php if (!empty($b->history_log)) { ?>
-                                        <a href="#" class="button button-small paguro-history-toggle" data-history="<?php echo esc_attr(base64_encode($b->history_log)); ?>" title="Mostra log">🕒</a>
+                                        <a href="#" class="button button-small paguro-history-toggle" data-history="<?php echo esc_attr(base64_encode($b->history_log)); ?>" title="Mostra log" onclick="return paguroAdminShowLog(this);">🕒</a>
                                     <?php } else { ?>
                                         <span style="color:#999;">—</span>
                                     <?php } ?>
@@ -518,8 +812,8 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                         <?php wp_nonce_field('paguro_admin_action'); ?>
                                         <input type="hidden" name="booking_id" value="<?php echo $b->id; ?>">
                                         <button type="submit" name="paguro_action" value="resend_email" class="button button-small">Reinvia Email</button>
-                                        <button type="submit" name="paguro_action" value="anonymize" class="button button-small" onclick="return confirm('Anonimizzare i dati?')">GDPR</button>
-                                        <button type="submit" name="paguro_action" value="delete_booking" class="button button-small button-link-delete" onclick="return confirm('Eliminare?')">Elimina</button>
+                                        <button type="submit" name="paguro_action" value="anonymize" class="button button-small paguro-admin-confirm" data-confirm="Anonimizzare i dati?">GDPR</button>
+                                        <button type="submit" name="paguro_action" value="delete_booking" class="button button-small button-link-delete paguro-admin-confirm" data-confirm="Eliminare?">Elimina</button>
                                     </form>
                                 </td>
                             </tr>
@@ -581,7 +875,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                 <form method="POST" style="display: inline;">
                                     <?php wp_nonce_field('paguro_apt_nonce'); ?>
                                     <input type="hidden" name="apt_id" value="<?php echo $apt->id; ?>">
-                                    <button type="submit" name="paguro_apt_action" value="delete_apt" class="button button-small button-link-delete" onclick="return confirm('Eliminare?')">Elimina</button>
+                                    <button type="submit" name="paguro_apt_action" value="delete_apt" class="button button-small button-link-delete paguro-admin-confirm" data-confirm="Eliminare?">Elimina</button>
                                 </form>
                             </td>
                         </tr>
@@ -597,7 +891,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
         <?php if ($current_tab === 'emails') { ?>
             <h2>Email Templates</h2>
 
-            <div class="card paguro-full-width-card">
+            <div class="card paguro-full-width-card" id="paguro-email-templates">
                 <?php
                 $default_cancel_req_body_old = 'Ciao {guest_name},<br><br>Abbiamo ricevuto la tua richiesta di cancellazione per {apt_name} ({date_start} - {date_end}).<br>La richiesta è in verifica dal nostro staff.<br><br>IBAN per rimborso: {customer_iban_priv}<br>Se applicabile, il termine di cancellazione era {cancel_deadline}.';
                 $default_cancel_req_body = 'Ciao {guest_name},<br><br>' .
@@ -811,7 +1105,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                         <tr>
                             <th>Soggetto</th>
                             <td>
-                                <input type="text" name="email_refund_subj" value="<?php echo esc_attr(get_option('paguro_msg_email_refund_subj', 'Bonifico disposto - {apt_name}')); ?>" style="width: 100%; max-width: 500px;">
+                                <input type="text" name="email_refund_subj" value="<?php echo esc_attr(get_option('paguro_msg_email_refund_subj', 'Rimborso disposto - {apt_name}')); ?>" style="width: 100%; max-width: 500px;">
                             </td>
                         </tr>
                         <tr>
@@ -819,8 +1113,74 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                             <td>
                                 <?php 
                                 wp_editor(
-                                    get_option('paguro_msg_email_refund_body', 'Ciao {guest_name},<br><br>Ti confermiamo che il bonifico di rimborso è stato disposto sul seguente IBAN:<br><strong>{customer_iban_priv}</strong><br><br>I tempi di accredito possono variare in base alla tua banca.<br><br>Grazie comunque per averci contattato e per la fiducia riposta.<br>Speriamo di poterti ospitare in futuro.'),
+                                    get_option('paguro_msg_email_refund_body', 'Gentile {guest_name},<br><br>Il rimborso è stato disposto su questo IBAN:<br><strong>{customer_iban_priv}</strong><br><br>I tempi di accredito dipendono dalla banca.<br><br>Grazie per averci contattato.'),
                                     'email_refund_body',
+                                    ['textarea_rows' => 6]
+                                );
+                                ?>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <h3>Email: Lista d'Attesa (Utente) <span class="paguro-badge paguro-badge--gray">EMAIL-WAITLIST</span></h3>
+                    <table class="form-table">
+                        <tr>
+                            <th>Soggetto</th>
+                            <td>
+                                <input type="text" name="email_waitlist_subj" value="<?php echo esc_attr(get_option('paguro_txt_email_waitlist_subj', 'Lista d\'attesa {apt_name}')); ?>" style="width: 100%; max-width: 500px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Corpo</th>
+                            <td>
+                                <?php
+                                wp_editor(
+                                    get_option('paguro_txt_email_waitlist_body', 'Gentile {guest_name},<br><br>La tua richiesta per {apt_name} ({date_start} - {date_end}) è in lista d\'attesa.<br>Ti avviseremo appena si libera.<br><br><a href="{link_riepilogo}" class="button">APRI RIEPILOGO</a>'),
+                                    'email_waitlist_body',
+                                    ['textarea_rows' => 6]
+                                );
+                                ?>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <h3>Email: Lista d'Attesa (Admin) <span class="paguro-badge paguro-badge--gray">EMAIL-WAITLIST-ADM</span></h3>
+                    <table class="form-table">
+                        <tr>
+                            <th>Soggetto</th>
+                            <td>
+                                <input type="text" name="email_waitlist_adm_subj" value="<?php echo esc_attr(get_option('paguro_txt_email_waitlist_adm_subj', 'Nuova lista d\'attesa: {apt_name}')); ?>" style="width: 100%; max-width: 500px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Corpo</th>
+                            <td>
+                                <?php
+                                wp_editor(
+                                    get_option('paguro_txt_email_waitlist_adm_body', 'Nuova iscrizione: {guest_name} ({guest_email}) | {apt_name} {date_start} - {date_end}.'),
+                                    'email_waitlist_adm_body',
+                                    ['textarea_rows' => 6]
+                                );
+                                ?>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <h3>Email: Avviso Disponibilità Waitlist (Utente) <span class="paguro-badge paguro-badge--gray">EMAIL-WAITLIST-ALERT</span></h3>
+                    <table class="form-table">
+                        <tr>
+                            <th>Soggetto</th>
+                            <td>
+                                <input type="text" name="email_waitlist_alert_subj" value="<?php echo esc_attr(get_option('paguro_txt_email_waitlist_alert_subj', 'Disponibilità {apt_name}')); ?>" style="width: 100%; max-width: 500px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Corpo</th>
+                            <td>
+                                <?php
+                                wp_editor(
+                                    get_option('paguro_txt_email_waitlist_alert_body', 'Gentile {guest_name},<br><br>Si è liberato {apt_name} per {date_start} - {date_end}.<br>Se sei interessato puoi prenotare ora.<br><br><a href="{booking_url}" class="button">PRENOTA ORA</a>'),
+                                    'email_waitlist_alert_body',
                                     ['textarea_rows' => 6]
                                 );
                                 ?>
@@ -840,7 +1200,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
         <?php if ($current_tab === 'web_templates') { ?>
             <h2>Web Templates</h2>
 
-            <div class="card paguro-full-width-card">
+            <div class="card paguro-full-width-card" id="paguro-web-templates">
                 <p style="color: #666;">Messaggi e contenuti visibili all'utente nel browser.</p>
 
                 <form method="POST">
@@ -905,7 +1265,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                         <code>{deposit_percent}</code> <code>{iban}</code> <code>{customer_iban}</code> <code>{customer_iban_priv}</code> <code>{intestatario}</code>
                                         <code>{receipt_url}</code> <code>{receipt_uploaded_at}</code> <code>{receipt_uploaded_at_fmt}</code>
                                         <code>{booking_id}</code> <code>{apartment_id}</code> <code>{status}</code> <code>{token}</code>
-                                        <code>{created_at}</code> <code>{lock_expires}</code>
+                                        <code>{created_at}</code> <code>{created_at_fmt}</code> <code>{lock_expires}</code>
                                         <code>{link_riepilogo}</code> <code>{booking_url}</code>
                                     </div>
                                 </details>
@@ -914,9 +1274,9 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                     </table>
 
                     <?php
-                    $summary_confirm_default = '<p><strong>La tua prenotazione è confermata.</strong></p>' .
-                        '<p>Soggiorno: {date_start} - {date_end} presso {apt_name}.</p>' .
-                        '<p>Di seguito trovi i dettagli del pagamento e la distinta (se disponibile).</p>';
+                    $summary_confirm_default = '<p><strong>Prenotazione confermata.</strong></p>' .
+                        '<p>{apt_name} | {date_start} - {date_end}</p>' .
+                        '<p>Di seguito i dettagli di pagamento e la distinta (se presente).</p>';
                     $summary_confirm_value = get_option('paguro_msg_ui_summary_confirm_page', '');
                     if ($summary_confirm_value === '') {
                         $summary_confirm_value = $summary_confirm_default;
@@ -948,10 +1308,437 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                         <code>{deposit_percent}</code> <code>{iban}</code> <code>{customer_iban}</code> <code>{customer_iban_priv}</code> <code>{intestatario}</code>
                                         <code>{receipt_url}</code> <code>{receipt_uploaded_at}</code> <code>{receipt_uploaded_at_fmt}</code>
                                         <code>{booking_id}</code> <code>{apartment_id}</code> <code>{status}</code> <code>{token}</code>
-                                        <code>{created_at}</code> <code>{lock_expires}</code>
+                                        <code>{created_at}</code> <code>{created_at_fmt}</code> <code>{lock_expires}</code>
                                         <code>{link_riepilogo}</code> <code>{booking_url}</code>
                                     </div>
                                 </details>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <h3>Testi UI - Header e Login</h3>
+                    <table class="form-table">
+                        <tr>
+                            <th>Titolo Riepilogo Preventivo</th>
+                            <td>
+                                <input type="text" name="ui_summary_title" value="<?php echo esc_attr(get_option('paguro_msg_ui_summary_title', 'Riepilogo preventivo')); ?>" style="width:100%; max-width: 700px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Titolo Riepilogo Lista d'Attesa</th>
+                            <td>
+                                <input type="text" name="ui_waitlist_title" value="<?php echo esc_attr(get_option('paguro_msg_ui_waitlist_title', "Riepilogo lista d'attesa")); ?>" style="width:100%; max-width: 700px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Token Mancante</th>
+                            <td>
+                                <input type="text" name="ui_missing_token" value="<?php echo esc_attr(get_option('paguro_msg_ui_missing_token', 'Codice di accesso mancante.')); ?>" style="width:100%; max-width: 700px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Titolo Login</th>
+                            <td>
+                                <input type="text" name="ui_auth_title" value="<?php echo esc_attr(get_option('paguro_msg_ui_auth_title', 'Area riservata')); ?>" style="width:100%; max-width: 700px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Testo Login (Preventivo)</th>
+                            <td>
+                                <textarea name="ui_auth_help_quote" rows="2" style="width:100%; max-width: 900px;"><?php echo esc_textarea(get_option('paguro_msg_ui_auth_help_quote', "Inserisci l'email usata per la richiesta.")); ?></textarea>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Testo Login (Lista d'Attesa)</th>
+                            <td>
+                                <textarea name="ui_auth_help_waitlist" rows="2" style="width:100%; max-width: 900px;"><?php echo esc_textarea(get_option('paguro_msg_ui_auth_help_waitlist', "Inserisci l'email usata per la lista d'attesa.")); ?></textarea>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Label Email Login</th>
+                            <td>
+                                <input type="text" name="ui_auth_email_label" value="<?php echo esc_attr(get_option('paguro_msg_ui_auth_email_label', 'Email *')); ?>" style="width:100%; max-width: 400px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Bottone Login</th>
+                            <td>
+                                <input type="text" name="ui_auth_submit" value="<?php echo esc_attr(get_option('paguro_msg_ui_auth_submit', 'Accedi')); ?>" style="width:100%; max-width: 300px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Errore Login</th>
+                            <td>
+                                <input type="text" name="ui_auth_error" value="<?php echo esc_attr(get_option('paguro_msg_ui_auth_error', 'Email non trovata.')); ?>" style="width:100%; max-width: 700px;">
+                            </td>
+                        </tr>
+                    </table>
+
+                    <h3>Testi UI - Richiesta Preventivo (Form)</h3>
+                    <table class="form-table">
+                        <tr>
+                            <th>Titolo Form Preventivo</th>
+                            <td>
+                                <input type="text" name="ui_quote_title" value="<?php echo esc_attr(get_option('paguro_msg_ui_quote_title', 'Richiesta preventivo {apt_name}')); ?>" style="width:100%; max-width: 800px;">
+                                <p class="description">Usa <code>{apt_name}</code> per il nome appartamento.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Sottotitolo Form Preventivo</th>
+                            <td>
+                                <input type="text" name="ui_quote_subtitle" value="<?php echo esc_attr(get_option('paguro_msg_ui_quote_subtitle', 'Compila i dati per ricevere il preventivo.')); ?>" style="width:100%; max-width: 800px;">
+                                <p class="description">Se vuoto, non viene mostrato.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Nota sotto "Nome Completo"</th>
+                            <td>
+                                <input type="text" name="ui_quote_name_help" value="<?php echo esc_attr(get_option('paguro_msg_ui_quote_name_help', 'Intestatario IBAN')); ?>" style="width:100%; max-width: 800px;">
+                            </td>
+                        </tr>
+                    </table>
+
+                    <h3>Testi UI - Alert e Stati</h3>
+                    <table class="form-table">
+                        <tr>
+                            <th>Prenotazione Non Trovata</th>
+                            <td>
+                                <input type="text" name="ui_booking_not_found" value="<?php echo esc_attr(get_option('paguro_msg_ui_booking_not_found', 'Prenotazione non trovata.')); ?>" style="width:100%; max-width: 700px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Lista d'Attesa Non Trovata</th>
+                            <td>
+                                <input type="text" name="ui_waitlist_not_found" value="<?php echo esc_attr(get_option('paguro_msg_ui_waitlist_not_found', "Iscrizione non trovata.")); ?>" style="width:100%; max-width: 800px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Lista d'Attesa Annullata</th>
+                            <td>
+                                <input type="text" name="ui_waitlist_cancelled" value="<?php echo esc_attr(get_option('paguro_msg_ui_waitlist_cancelled', "Iscrizione annullata.")); ?>" style="width:100%; max-width: 700px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Titolo Stato Lista d'Attesa</th>
+                            <td>
+                                <input type="text" name="ui_waitlist_title_text" value="<?php echo esc_attr(get_option('paguro_msg_ui_waitlist_title_text', "Sei in lista d'attesa")); ?>" style="width:100%; max-width: 500px;">
+                                <p class="description">Nel riepilogo viene aggiunta automaticamente l'icona ✅.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Testo Stato Lista d'Attesa (Inline)</th>
+                            <td>
+                                <textarea name="ui_waitlist_inline_notice" rows="2" style="width:100%; max-width: 900px;"><?php echo esc_textarea(get_option('paguro_msg_ui_waitlist_inline_notice', 'Ti avviseremo appena si libera.')); ?></textarea>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Testo Stato Lista d'Attesa (Pagina)</th>
+                            <td>
+                                <textarea name="ui_waitlist_page_notice" rows="2" style="width:100%; max-width: 900px;"><?php echo esc_textarea(get_option('paguro_msg_ui_waitlist_page_notice', 'Ti avviseremo appena si libera.')); ?></textarea>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Label "Date Richieste" (Inline)</th>
+                            <td>
+                                <input type="text" name="ui_waitlist_inline_dates_label" value="<?php echo esc_attr(get_option('paguro_msg_ui_waitlist_inline_dates_label', 'Periodo:')); ?>" style="width:100%; max-width: 400px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Cancellazione Richiesta</th>
+                            <td>
+                                <input type="text" name="ui_cancel_requested" value="<?php echo esc_attr(get_option('paguro_msg_ui_cancel_requested', 'Richiesta di cancellazione inviata.')); ?>" style="width:100%; max-width: 700px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Cancellazione In Attesa</th>
+                            <td>
+                                <input type="text" name="ui_cancel_pending" value="<?php echo esc_attr(get_option('paguro_msg_ui_cancel_pending', 'Cancellazione già richiesta.')); ?>" style="width:100%; max-width: 700px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>IBAN Richiesto</th>
+                            <td>
+                                <input type="text" name="ui_cancel_iban_required" value="<?php echo esc_attr(get_option('paguro_msg_ui_cancel_iban_required', 'Inserisci un IBAN valido.')); ?>" style="width:100%; max-width: 700px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>IBAN Non Valido</th>
+                            <td>
+                                <input type="text" name="ui_cancel_iban_invalid" value="<?php echo esc_attr(get_option('paguro_msg_ui_cancel_iban_invalid', 'IBAN non valido.')); ?>" style="width:100%; max-width: 700px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Cancellazione Non Disponibile (Alert)</th>
+                            <td>
+                                <textarea name="ui_cancel_denied" rows="2" style="width:100%; max-width: 900px;"><?php echo esc_textarea(get_option('paguro_msg_ui_cancel_denied', 'Cancellazione non disponibile oltre {cancel_deadline}.')); ?></textarea>
+                                <p class="description">Usa <code>{cancel_deadline}</code> per la data limite.</p>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <h3>Testi UI - Sezioni ed Etichette</h3>
+                    <table class="form-table">
+                        <tr>
+                            <th>Titolo Sezione "Dati Prenotazione"</th>
+                            <td>
+                                <input type="text" name="ui_section_booking" value="<?php echo esc_attr(get_option('paguro_msg_ui_section_booking', 'Dettagli soggiorno')); ?>" style="width:100%; max-width: 500px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Titolo Sezione "Calcolo Prezzo"</th>
+                            <td>
+                                <input type="text" name="ui_section_pricing" value="<?php echo esc_attr(get_option('paguro_msg_ui_section_pricing', 'Prezzo')); ?>" style="width:100%; max-width: 500px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Titolo Sezione "Dati per il Bonifico"</th>
+                            <td>
+                                <input type="text" name="ui_section_payment" value="<?php echo esc_attr(get_option('paguro_msg_ui_section_payment', 'Bonifico')); ?>" style="width:100%; max-width: 500px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Titolo Sezione "Carica Distinta"</th>
+                            <td>
+                                <input type="text" name="ui_section_upload" value="<?php echo esc_attr(get_option('paguro_msg_ui_section_upload', 'Carica distinta')); ?>" style="width:100%; max-width: 600px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Titolo Sezione "Distinta Caricata"</th>
+                            <td>
+                                <input type="text" name="ui_section_uploaded" value="<?php echo esc_attr(get_option('paguro_msg_ui_section_uploaded', 'Distinta ricevuta')); ?>" style="width:100%; max-width: 500px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Titolo Sezione "Azioni"</th>
+                            <td>
+                                <input type="text" name="ui_section_actions" value="<?php echo esc_attr(get_option('paguro_msg_ui_section_actions', 'Azioni')); ?>" style="width:100%; max-width: 300px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Label Ospite</th>
+                            <td>
+                                <input type="text" name="ui_label_guest" value="<?php echo esc_attr(get_option('paguro_msg_ui_label_guest', 'Ospite')); ?>" style="width:100%; max-width: 300px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Label Nome (Waitlist)</th>
+                            <td>
+                                <input type="text" name="ui_label_name" value="<?php echo esc_attr(get_option('paguro_msg_ui_label_name', 'Nome')); ?>" style="width:100%; max-width: 300px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Label Email</th>
+                            <td>
+                                <input type="text" name="ui_label_email" value="<?php echo esc_attr(get_option('paguro_msg_ui_label_email', 'Email')); ?>" style="width:100%; max-width: 300px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Label Telefono</th>
+                            <td>
+                                <input type="text" name="ui_label_phone" value="<?php echo esc_attr(get_option('paguro_msg_ui_label_phone', 'Telefono')); ?>" style="width:100%; max-width: 300px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Label Appartamento</th>
+                            <td>
+                                <input type="text" name="ui_label_apartment" value="<?php echo esc_attr(get_option('paguro_msg_ui_label_apartment', 'Appartamento')); ?>" style="width:100%; max-width: 300px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Label Check-in</th>
+                            <td>
+                                <input type="text" name="ui_label_checkin" value="<?php echo esc_attr(get_option('paguro_msg_ui_label_checkin', 'Check-in')); ?>" style="width:100%; max-width: 300px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Label Check-out</th>
+                            <td>
+                                <input type="text" name="ui_label_checkout" value="<?php echo esc_attr(get_option('paguro_msg_ui_label_checkout', 'Check-out')); ?>" style="width:100%; max-width: 300px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Suffisso Giorno (Check-in/out)</th>
+                            <td>
+                                <input type="text" name="ui_label_check_suffix" value="<?php echo esc_attr(get_option('paguro_msg_ui_label_check_suffix', ' (sabato)')); ?>" style="width:100%; max-width: 300px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Label Costo Totale</th>
+                            <td>
+                                <input type="text" name="ui_label_total_cost" value="<?php echo esc_attr(get_option('paguro_msg_ui_label_total_cost', 'Totale soggiorno')); ?>" style="width:100%; max-width: 300px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Label Acconto</th>
+                            <td>
+                                <input type="text" name="ui_label_deposit" value="<?php echo esc_attr(get_option('paguro_msg_ui_label_deposit', 'Acconto (30%)')); ?>" style="width:100%; max-width: 400px;">
+                                <p class="description">Puoi usare <code>{deposit_percent}</code> per mostrare la percentuale corrente.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Label Saldo</th>
+                            <td>
+                                <input type="text" name="ui_label_remaining" value="<?php echo esc_attr(get_option('paguro_msg_ui_label_remaining', 'Saldo in struttura')); ?>" style="width:100%; max-width: 400px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Label Intestatario</th>
+                            <td>
+                                <input type="text" name="ui_label_owner" value="<?php echo esc_attr(get_option('paguro_msg_ui_label_owner', 'Intestatario')); ?>" style="width:100%; max-width: 300px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Label IBAN</th>
+                            <td>
+                                <input type="text" name="ui_label_iban" value="<?php echo esc_attr(get_option('paguro_msg_ui_label_iban', 'IBAN')); ?>" style="width:100%; max-width: 300px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Label Importo</th>
+                            <td>
+                                <input type="text" name="ui_label_amount" value="<?php echo esc_attr(get_option('paguro_msg_ui_label_amount', 'Importo')); ?>" style="width:100%; max-width: 300px;">
+                            </td>
+                        </tr>
+                    </table>
+
+                    <h3>Testi UI - Upload e Distinta</h3>
+                    <table class="form-table">
+                        <tr>
+                            <th>Testo Dropzone Upload</th>
+                            <td>
+                                <input type="text" name="ui_upload_drop" value="<?php echo esc_attr(get_option('paguro_msg_ui_upload_drop', 'Trascina qui il file o seleziona')); ?>" style="width:100%; max-width: 800px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Titolo Upload Riuscito</th>
+                            <td>
+                                <input type="text" name="ui_upload_success_title" value="<?php echo esc_attr(get_option('paguro_msg_ui_upload_success_title', 'Distinta ricevuta')); ?>" style="width:100%; max-width: 500px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Testo Upload Riuscito</th>
+                            <td>
+                                <textarea name="ui_upload_success_text" rows="2" style="width:100%; max-width: 900px;"><?php echo esc_textarea(get_option('paguro_msg_ui_upload_success_text', 'Date bloccate in attesa di verifica.')); ?></textarea>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Avviso Distinta in Validazione</th>
+                            <td>
+                                <input type="text" name="ui_receipt_pending" value="<?php echo esc_attr(get_option('paguro_msg_ui_receipt_pending', 'Distinta in verifica (entro 24h).')); ?>" style="width:100%; max-width: 700px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Testo Distinta Caricata</th>
+                            <td>
+                                <textarea name="ui_receipt_uploaded_text" rows="3" style="width:100%; max-width: 900px;"><?php echo esc_textarea(get_option('paguro_msg_ui_receipt_uploaded_text', 'Distinta ricevuta. Verifica entro 24h.')); ?></textarea>
+                                <p class="description">Le nuove righe vengono convertite in <code>&lt;br&gt;</code>.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Bottone "Visualizza Distinta"</th>
+                            <td>
+                                <input type="text" name="ui_receipt_view_cta" value="<?php echo esc_attr(get_option('paguro_msg_ui_receipt_view_cta', 'Vedi distinta')); ?>" style="width:100%; max-width: 400px;">
+                            </td>
+                        </tr>
+                    </table>
+
+                    <h3>Testi UI - Cancellazione</h3>
+                    <table class="form-table">
+                        <tr>
+                            <th>Label IBAN Rimborso</th>
+                            <td>
+                                <input type="text" name="ui_cancel_label" value="<?php echo esc_attr(get_option('paguro_msg_ui_cancel_label', 'IBAN rimborso *')); ?>" style="width:100%; max-width: 400px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Placeholder IBAN</th>
+                            <td>
+                                <input type="text" name="ui_cancel_placeholder" value="<?php echo esc_attr(get_option('paguro_msg_ui_cancel_placeholder', 'IT00X0000000000000000000000')); ?>" style="width:100%; max-width: 400px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Testo Informativo IBAN</th>
+                            <td>
+                                <?php
+                                wp_editor(
+                                    get_option('paguro_msg_ui_cancel_help', "Con l'invio rinunci al soggiorno. Rimborso sul conto indicato."),
+                                    'ui_cancel_help',
+                                    ['textarea_rows' => 8]
+                                );
+                                ?>
+                                <p class="description">Puoi usare <code>{guest_name}</code> e <code>{guest_email}</code>.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Conferma Richiesta Cancellazione (Overlay)</th>
+                            <td>
+                                <textarea name="ui_cancel_confirm" rows="3" style="width:100%; max-width: 900px;"><?php echo esc_textarea(get_option('paguro_msg_ui_cancel_confirm', "Confermi la richiesta di cancellazione? Rimborso sul conto indicato.")); ?></textarea>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Bottone Cancella Prenotazione</th>
+                            <td>
+                                <input type="text" name="ui_cancel_cta" value="<?php echo esc_attr(get_option('paguro_msg_ui_cancel_cta', 'Richiedi cancellazione')); ?>" style="width:100%; max-width: 400px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Nota Scadenza Cancellazione</th>
+                            <td>
+                                <textarea name="ui_cancel_deadline_note" rows="2" style="width:100%; max-width: 900px;"><?php echo esc_textarea(get_option('paguro_msg_ui_cancel_deadline_note', 'Cancellazione possibile entro {cancel_deadline}.')); ?></textarea>
+                                <p class="description">Usa <code>{cancel_deadline}</code> per la data limite.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Cancellazione Non Disponibile (Blocco)</th>
+                            <td>
+                                <?php
+                                wp_editor(
+                                    get_option('paguro_msg_ui_cancel_unavailable', 'Cancellazione non disponibile (entro {cancel_deadline}).'),
+                                    'ui_cancel_unavailable',
+                                    ['textarea_rows' => 8]
+                                );
+                                ?>
+                                <p class="description">Usa <code>{cancel_deadline}</code> per la data limite.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Richiesta Cancellazione Inviata</th>
+                            <td>
+                                <textarea name="ui_cancel_requested_notice" rows="2" style="width:100%; max-width: 900px;"><?php echo esc_textarea(get_option('paguro_msg_ui_cancel_requested_notice', 'Cancellazione richiesta. Riceverai conferma email.')); ?></textarea>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <h3>Testi UI - Waitlist</h3>
+                    <table class="form-table">
+                        <tr>
+                            <th>Titolo Sezione "Dettagli Iscrizione"</th>
+                            <td>
+                                <input type="text" name="ui_waitlist_section_info" value="<?php echo esc_attr(get_option('paguro_msg_ui_waitlist_section_info', 'Dettagli iscrizione')); ?>" style="width:100%; max-width: 500px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Titolo Sezione "Date Richieste"</th>
+                            <td>
+                                <input type="text" name="ui_waitlist_section_dates" value="<?php echo esc_attr(get_option('paguro_msg_ui_waitlist_section_dates', 'Date richieste')); ?>" style="width:100%; max-width: 500px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Titolo Sezione "Cronologia"</th>
+                            <td>
+                                <input type="text" name="ui_waitlist_section_history" value="<?php echo esc_attr(get_option('paguro_msg_ui_waitlist_section_history', 'Cronologia')); ?>" style="width:100%; max-width: 500px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Bottone "Esci dalla Lista d'Attesa"</th>
+                            <td>
+                                <input type="text" name="ui_waitlist_exit_cta" value="<?php echo esc_attr(get_option('paguro_msg_ui_waitlist_exit_cta', 'Esci dalla lista')); ?>" style="width:100%; max-width: 500px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Conferma Uscita Lista d'Attesa (Overlay)</th>
+                            <td>
+                                <textarea name="ui_waitlist_exit_confirm" rows="2" style="width:100%; max-width: 900px;"><?php echo esc_textarea(get_option('paguro_msg_ui_waitlist_exit_confirm', "Confermi l'uscita dalla lista d'attesa?")); ?></textarea>
                             </td>
                         </tr>
                     </table>
@@ -1025,6 +1812,28 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                         </td>
                     </tr>
                     <tr>
+                        <th>Provider AI</th>
+                        <td>
+                            <?php $ai_provider = get_option('paguro_ai_provider', 'api'); ?>
+                            <select name="ai_provider">
+                                <option value="api" <?php selected($ai_provider, 'api'); ?>>API Remota</option>
+                                <option value="ollama" <?php selected($ai_provider, 'ollama'); ?>>Ollama (Locale)</option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Ollama URL</th>
+                        <td>
+                            <input type="url" name="ollama_url" value="<?php echo esc_attr(get_option('paguro_ollama_url', 'http://localhost:11434')); ?>" style="width: 100%; max-width: 400px;">
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Ollama Model</th>
+                        <td>
+                            <input type="text" name="ollama_model" value="<?php echo esc_attr(get_option('paguro_ollama_model', 'llama3.1')); ?>" style="width: 100%; max-width: 300px;">
+                        </td>
+                    </tr>
+                    <tr>
                         <th>reCAPTCHA - Site Key</th>
                         <td>
                             <input type="text" name="recaptcha_site" value="<?php echo esc_attr(get_option('paguro_recaptcha_site', '')); ?>">
@@ -1043,6 +1852,88 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                 </p>
             </form>
 
+        <?php } ?>
+
+        <!-- TAB: IA -->
+        <?php if ($current_tab === 'ai') { ?>
+            <h2>IA - Risposte Automatiche</h2>
+
+            <div class="card paguro-full-width-card">
+                <p style="color: #666;">Definisci parole chiave e risposte personalizzate. Se il messaggio dell'utente contiene una delle parole chiave, il bot risponderà con il testo associato.</p>
+
+                <form method="POST" id="paguro-ai-form">
+                    <?php wp_nonce_field('paguro_ai_rules'); ?>
+
+                    <div id="paguro-ai-rules">
+                        <?php
+                        $ai_rules = get_option('paguro_ai_rules', []);
+                        if (!is_array($ai_rules)) $ai_rules = [];
+                        if (empty($ai_rules)) {
+                            $ai_rules = [['keywords' => '', 'response' => '']];
+                        }
+                        foreach ($ai_rules as $idx => $rule) {
+                            $kw = esc_attr($rule['keywords'] ?? '');
+                            ?>
+                            <div class="paguro-ai-rule">
+                                <label>Parole chiave (separate da virgola)</label>
+                                <input type="text" name="ai_rule_keywords[]" value="<?php echo $kw; ?>" style="width:100%; max-width: 800px;">
+                                <label style="margin-top:8px;">Risposta (HTML consentito)</label>
+                                <?php
+                                $editor_id = 'ai_rule_response_' . $idx;
+                                wp_editor(
+                                    $rule['response'] ?? '',
+                                    $editor_id,
+                                    ['textarea_name' => 'ai_rule_response[]', 'textarea_rows' => 4]
+                                );
+                                ?>
+                                <button type="button" class="button paguro-ai-remove">Rimuovi</button>
+                            </div>
+                            <?php
+                        }
+                        ?>
+                    </div>
+
+                    <p>
+                        <button type="button" class="button" id="paguro-ai-add">Aggiungi regola</button>
+                    </p>
+
+                    <p>
+                        <button type="submit" name="paguro_save_ai_rules" class="button button-primary">Salva Regole IA</button>
+                    </p>
+                </form>
+            </div>
+
+            <script>
+                document.addEventListener('click', function(e) {
+                    if (e.target && e.target.id === 'paguro-ai-add') {
+                        var container = document.getElementById('paguro-ai-rules');
+                        if (!container) return;
+                        var block = document.createElement('div');
+                        block.className = 'paguro-ai-rule';
+                        var count = container.querySelectorAll('.paguro-ai-rule').length;
+                        var editorId = 'ai_rule_response_new_' + count;
+                        block.innerHTML = '' +
+                            '<label>Parole chiave (separate da virgola)</label>' +
+                            '<input type=\"text\" name=\"ai_rule_keywords[]\" value=\"\" style=\"width:100%; max-width: 800px;\">' +
+                            '<label style=\"margin-top:8px;\">Risposta (HTML consentito)</label>' +
+                            '<textarea id=\"' + editorId + '\" name=\"ai_rule_response[]\" rows=\"4\" style=\"width:100%; max-width: 900px;\"></textarea>' +
+                            '<button type=\"button\" class=\"button paguro-ai-remove\">Rimuovi</button>';
+                        container.appendChild(block);
+                        if (window.wp && window.wp.editor && typeof window.wp.editor.initialize === 'function') {
+                            window.wp.editor.initialize(editorId, {
+                                tinymce: true,
+                                quicktags: true,
+                                mediaButtons: false
+                            });
+                        }
+                    }
+
+                    if (e.target && e.target.classList.contains('paguro-ai-remove')) {
+                        var rule = e.target.closest('.paguro-ai-rule');
+                        if (rule) rule.remove();
+                    }
+                });
+            </script>
         <?php } ?>
 
     </div>
@@ -1096,6 +1987,21 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
 .paguro-admin .paguro-badge--red { background: #ffd6d6; color: #7a0000; border-color: #f0a0a0; }
 .paguro-admin .paguro-badge--gray { background: #eef1f4; color: #505a64; border-color: #d6dde5; }
 .paguro-admin .paguro-badge--blue { background: #dbeafe; color: #1e3a8a; border-color: #bfdbfe; }
+.paguro-admin .paguro-ai-rule {
+    margin: 16px 0;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: #fafafa;
+}
+.paguro-admin .paguro-ai-rule label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+.paguro-admin .paguro-ai-rule .paguro-ai-remove {
+    margin-top: 10px;
+}
 </style>
 
 <script>

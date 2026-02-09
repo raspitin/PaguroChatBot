@@ -37,6 +37,97 @@
     margin: 0;
     font-size: 28px;
     font-weight: 600;
+    color: #fff;
+}
+
+/* =========================================================
+   OVERLAY (MESSAGES & RECEIPT)
+   ========================================================= */
+
+.paguro-overlay {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.paguro-overlay.is-open {
+    display: flex;
+}
+
+.paguro-overlay-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.paguro-overlay-card {
+    position: relative;
+    z-index: 1;
+    width: min(90vw, 640px);
+    max-height: 85vh;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+    padding: 22px;
+    overflow: auto;
+}
+
+.paguro-overlay.is-receipt .paguro-overlay-card {
+    width: min(94vw, 1000px);
+    height: 85vh;
+    padding: 16px;
+}
+
+.paguro-overlay-close {
+    position: absolute;
+    right: 10px;
+    top: 8px;
+    border: none;
+    background: transparent;
+    font-size: 22px;
+    cursor: pointer;
+}
+
+.paguro-overlay-content {
+    padding-top: 8px;
+}
+
+.paguro-overlay-message {
+    font-size: 15px;
+    color: #333;
+    line-height: 1.5;
+}
+
+.paguro-overlay-message--error {
+    color: #b00020;
+}
+
+.paguro-overlay-actions {
+    margin-top: 20px;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+
+.paguro-overlay-frame {
+    width: 100%;
+    height: calc(85vh - 60px);
+    border: none;
+}
+
+/* Cancel help content (admin editor output) */
+.paguro-cancel-help {
+    font-size: 14px;
+    color: #333;
+    margin-top: 8px;
+}
+
+.paguro-cancel-help p {
+    margin: 10px 0;
 }
 
 /* =========================================================
@@ -254,6 +345,9 @@
    ========================================================= */
 
 .paguro-upload-drop-zone {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
     border: 2px dashed #0073aa;
     border-radius: 8px;
     padding: 40px 20px;

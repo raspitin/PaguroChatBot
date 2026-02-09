@@ -125,6 +125,11 @@ function paguro_get_email_placeholders($b) {
     $customer_iban = isset($b->customer_iban) ? $b->customer_iban : '';
     $customer_iban_norm = strtoupper(preg_replace('/\s+/', '', $customer_iban));
     $customer_iban_priv = paguro_mask_iban($customer_iban_norm);
+    $created_at_fmt = '';
+    if (!empty($b->created_at)) {
+        $created_at_dt = new DateTime($b->created_at, $tz);
+        $created_at_fmt = $created_at_dt->format('d/m/Y H:i');
+    }
 
     return [
         'guest_name' => $b->guest_name,
@@ -163,6 +168,7 @@ function paguro_get_email_placeholders($b) {
         'status' => $b->status,
         'token' => $b->lock_token,
         'created_at' => $b->created_at,
+        'created_at_fmt' => $created_at_fmt,
         'lock_expires' => $b->lock_expires,
         'link_riepilogo' => $link_riepilogo,
         'booking_url' => $booking_url,
@@ -178,6 +184,22 @@ function paguro_escape_user_placeholders($placeholders) {
         }
     }
     return $safe;
+}
+
+function paguro_get_admin_receipt_link($booking_id, $receipt_url = '') {
+    $booking_id = intval($booking_id);
+    if ($booking_id <= 0 || $receipt_url === '') {
+        return admin_url('admin.php?page=paguro-booking&tab=bookings');
+    }
+    $hash = wp_hash($booking_id . '|' . $receipt_url);
+    return add_query_arg(
+        [
+            'action' => 'paguro_admin_receipt',
+            'booking_id' => $booking_id,
+            'h' => $hash
+        ],
+        admin_url('admin-post.php')
+    );
 }
 
 // =========================================================
@@ -312,6 +334,9 @@ function paguro_send_receipt_received_to_admin($booking_id) {
     $placeholders = paguro_escape_user_placeholders(paguro_get_email_placeholders($b));
     $placeholders['admin_link'] = admin_url('admin.php?page=paguro-booking&tab=bookings');
     $placeholders['booking_id'] = $b->id;
+    if (!empty($b->receipt_url)) {
+        $placeholders['receipt_url'] = paguro_get_admin_receipt_link($b->id, $b->receipt_url);
+    }
     
     $subject = paguro_parse_template(
         get_option('paguro_msg_email_adm_receipt_subj', 'Distinta Caricata: {apt_name}'),
@@ -563,27 +588,25 @@ function paguro_send_refund_sent_to_user($booking_id) {
 
     $placeholders = paguro_escape_user_placeholders(paguro_get_email_placeholders($b));
 
-    $subject_tpl = get_option('paguro_msg_email_refund_subj', 'Bonifico disposto - {apt_name}');
+    $subject_tpl = get_option('paguro_msg_email_refund_subj', 'Rimborso disposto - {apt_name}');
     if ($subject_tpl === '') {
-        $subject_tpl = 'Bonifico disposto - {apt_name}';
+        $subject_tpl = 'Rimborso disposto - {apt_name}';
     }
     $subject = paguro_parse_template($subject_tpl, $placeholders);
 
     $body_tpl = get_option('paguro_msg_email_refund_body',
-        'Ciao {guest_name},<br><br>' .
-        'Ti confermiamo che il bonifico di rimborso è stato disposto sul seguente IBAN:<br>' .
+        'Gentile {guest_name},<br><br>' .
+        'Il rimborso è stato disposto su questo IBAN:<br>' .
         '<strong>{customer_iban_priv}</strong><br><br>' .
-        'I tempi di accredito possono variare in base alla tua banca.<br><br>' .
-        'Grazie comunque per averci contattato e per la fiducia riposta.<br>' .
-        'Speriamo di poterti ospitare in futuro.'
+        'I tempi di accredito dipendono dalla banca.<br><br>' .
+        'Grazie per averci contattato.'
     );
     if ($body_tpl === '') {
-        $body_tpl = 'Ciao {guest_name},<br><br>' .
-            'Ti confermiamo che il bonifico di rimborso è stato disposto sul seguente IBAN:<br>' .
+        $body_tpl = 'Gentile {guest_name},<br><br>' .
+            'Il rimborso è stato disposto su questo IBAN:<br>' .
             '<strong>{customer_iban_priv}</strong><br><br>' .
-            'I tempi di accredito possono variare in base alla tua banca.<br><br>' .
-            'Grazie comunque per averci contattato e per la fiducia riposta.<br>' .
-            'Speriamo di poterti ospitare in futuro.';
+            'I tempi di accredito dipendono dalla banca.<br><br>' .
+            'Grazie per averci contattato.';
     }
     $body = paguro_parse_template($body_tpl, $placeholders);
 
@@ -644,15 +667,21 @@ function paguro_send_waitlist_availability_alert($booking_id) {
     if (!$b || !is_email($b->guest_email)) return false;
     
     $placeholders = paguro_escape_user_placeholders(paguro_get_email_placeholders($b));
-    
-    $subject = "✨ Buone notizie! {apt_name} è disponibile";
-    
-    $body = "Ciao {guest_name},<br><br>" .
-            "Il periodo che ti interessava ({date_start} - {date_end}) per {apt_name} si è appena liberato!<br>" .
-            "Se sei ancora interessato, affrettati a prenotare prima che venga bloccato nuovamente.<br><br>" .
-            "<a href='{booking_url}' style='display:inline-block; background:#28a745; color:#fff; padding:12px 25px; text-decoration:none; border-radius:5px; font-weight:bold;'>PRENOTA ORA</a>";
-    
-    return paguro_send_email($b->guest_email, paguro_parse_template($subject, $placeholders), paguro_parse_template($body, $placeholders), false);
+
+    $subject_tpl = get_option('paguro_txt_email_waitlist_alert_subj', 'Disponibilità {apt_name}');
+    $body_tpl = get_option('paguro_txt_email_waitlist_alert_body',
+        "Gentile {guest_name},<br><br>" .
+        "Si è liberato {apt_name} per {date_start} - {date_end}.<br>" .
+        "Se sei interessato puoi prenotare ora.<br><br>" .
+        "<a href='{booking_url}' style='display:inline-block; background:#28a745; color:#fff; padding:12px 25px; text-decoration:none; border-radius:5px; font-weight:bold;'>PRENOTA ORA</a>"
+    );
+
+    return paguro_send_email(
+        $b->guest_email,
+        paguro_parse_template($subject_tpl, $placeholders),
+        paguro_parse_template($body_tpl, $placeholders),
+        false
+    );
 }
 
 // =========================================================
@@ -674,15 +703,21 @@ function paguro_send_waitlist_confirmation_to_user($booking_id) {
     $placeholders = paguro_escape_user_placeholders(paguro_get_email_placeholders($b));
     $page_slug = get_option('paguro_page_slug', 'riepilogo-prenotazione');
     $placeholders['link_riepilogo'] = site_url("/{$page_slug}/?token={$b->lock_token}&waitlist=1");
-    
-    $subject = "✅ Sei in Lista d'Attesa: {apt_name}";
-    
-    $body = "Ciao {guest_name},<br><br>" .
-            "Ti abbiamo registrato nella lista d'attesa per {apt_name} ({date_start} - {date_end}).<br>" .
-            "Ti avviseremo via email non appena il periodo si libererà.<br><br>" .
-            "<a href='{link_riepilogo}' style='display:inline-block; background:#0073aa; color:#fff; padding:12px 25px; text-decoration:none; border-radius:5px; font-weight:bold;'>VISUALIZZA DETTAGLI</a>";
-    
-    return paguro_send_email($b->guest_email, paguro_parse_template($subject, $placeholders), paguro_parse_template($body, $placeholders), false);
+
+    $subject_tpl = get_option('paguro_txt_email_waitlist_subj', "Lista d'attesa {apt_name}");
+    $body_tpl = get_option('paguro_txt_email_waitlist_body',
+        "Gentile {guest_name},<br><br>" .
+        "La tua richiesta per {apt_name} ({date_start} - {date_end}) è in lista d'attesa.<br>" .
+        "Ti avviseremo appena si libera.<br><br>" .
+        "<a href='{link_riepilogo}' style='display:inline-block; background:#0073aa; color:#fff; padding:12px 25px; text-decoration:none; border-radius:5px; font-weight:bold;'>APRI RIEPILOGO</a>"
+    );
+
+    return paguro_send_email(
+        $b->guest_email,
+        paguro_parse_template($subject_tpl, $placeholders),
+        paguro_parse_template($body_tpl, $placeholders),
+        false
+    );
 }
 
 // =========================================================
@@ -704,12 +739,16 @@ function paguro_send_waitlist_confirmation_to_admin($booking_id) {
     $admin_email = get_option('admin_email');
     
     $placeholders = paguro_escape_user_placeholders(paguro_get_email_placeholders($b));
-    
-    $subject = "Nuova Iscrizione Waitlist: {apt_name}";
-    
-    $body = "Utente {guest_name} si è iscritto alla lista d'attesa per {apt_name} ({date_start} - {date_end}).";
-    
-    return paguro_send_email($admin_email, paguro_parse_template($subject, $placeholders), paguro_parse_template($body, $placeholders), true);
+
+    $subject_tpl = get_option('paguro_txt_email_waitlist_adm_subj', "Nuova lista d'attesa: {apt_name}");
+    $body_tpl = get_option('paguro_txt_email_waitlist_adm_body', 'Nuova iscrizione: {guest_name} ({guest_email}) | {apt_name} {date_start} - {date_end}.');
+
+    return paguro_send_email(
+        $admin_email,
+        paguro_parse_template($subject_tpl, $placeholders),
+        paguro_parse_template($body_tpl, $placeholders),
+        true
+    );
 }
 
 ?>

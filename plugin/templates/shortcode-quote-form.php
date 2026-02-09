@@ -14,6 +14,7 @@ function paguro_shortcode_quote_form() {
     $apt = isset($_GET['apt']) ? sanitize_text_field($_GET['apt']) : '';
     $date_in = isset($_GET['in']) ? sanitize_text_field($_GET['in']) : '';
     $date_out = isset($_GET['out']) ? sanitize_text_field($_GET['out']) : '';
+    $apt_name = ucfirst($apt);
     
     // Se non hai token, non sei qui
     if (!$token || !$apt || !$date_in || !$date_out) {
@@ -50,36 +51,46 @@ function paguro_shortcode_quote_form() {
         
         if ($competitors > 0) {
             $msg = paguro_parse_template(
-                get_option('paguro_msg_ui_social_pressure', '⚡ Ci sono {count} altre richieste attive per queste date.'),
+                get_option('paguro_msg_ui_social_pressure', 'Altre {count} richieste attive per queste date.'),
                 ['count' => $competitors]
             );
             $social_html = "<div class='paguro-social-pressure'>$msg</div>";
         }
     }
+    $title_tpl = get_option('paguro_msg_ui_quote_title', 'Richiesta preventivo {apt_name}');
+    $subtitle_tpl = get_option('paguro_msg_ui_quote_subtitle', 'Compila i dati per ricevere il preventivo.');
+    $quote_title = paguro_parse_template($title_tpl, ['apt_name' => $apt_name]);
+    $quote_subtitle = paguro_parse_template($subtitle_tpl, ['apt_name' => $apt_name]);
+    $name_help = get_option('paguro_msg_ui_quote_name_help', 'Intestatario IBAN');
     
     ob_start(); ?>
     <div class="paguro-form-wrapper">
         <div class="paguro-form-card">
             <div class="paguro-form-header">
-                <h2>Richiesta Preventivo</h2>
-                <p class="paguro-form-subtitle"><?php echo esc_html(ucfirst($apt)); ?></p>
+                <h2><?php echo esc_html($quote_title); ?></h2>
+                <?php if (!empty($quote_subtitle)): ?>
+                    <p class="paguro-form-subtitle"><?php echo esc_html($quote_subtitle); ?></p>
+                <?php endif; ?>
             </div>
             
             <div class="paguro-form-dates">
-                <strong>📅 Date Selezionate:</strong>
+                <strong>Periodo selezionato:</strong>
                 <span><?php echo esc_html($date_in); ?> — <?php echo esc_html($date_out); ?></span>
             </div>
             
             <div class="paguro-form-body">
                 <?php echo $social_html; ?>
                 
-                <p class="paguro-form-instruction">Completa i dati per ricevere il preventivo dettagliato con i dati per il bonifico.</p>
+                <p class="paguro-form-instruction">Completa i dati per ricevere il preventivo.</p>
                 
                 <form id="paguro-quote-form" class="paguro-native-form">
                     <input type="hidden" name="token" value="<?php echo esc_attr($token); ?>">
                     
                     <div class="form-group">
-                        <label for="guest_name">Nome Completo *</label>
+                        <label for="guest_name">Nome e Cognome *</label>
+                        <?php if (!empty($name_help)): ?>
+                            <small class="paguro-form-help"><?php echo esc_html($name_help); ?></small>
+                        <?php endif; ?>
                         <input type="text" id="guest_name" name="guest_name" required autocomplete="name">
                     </div>
                     
@@ -94,19 +105,19 @@ function paguro_shortcode_quote_form() {
                     </div>
                     
                     <div class="form-group">
-                        <label for="guest_notes">Note (opzionale)</label>
+                        <label for="guest_notes">Note (opzionali)</label>
                         <textarea id="guest_notes" name="guest_notes" rows="3" autocomplete="off"></textarea>
                     </div>
                     
                     <button type="submit" class="paguro-btn paguro-btn-primary" id="paguro-submit-btn">
-                        Richiedi Preventivo
+                        Richiedi preventivo
                     </button>
                     
                     <div id="paguro-form-msg" class="paguro-form-message"></div>
                 </form>
                 
                 <p class="paguro-form-privacy">
-                    <?php echo wp_kses_post(get_option('paguro_msg_ui_privacy_notice', 'I tuoi dati sono protetti.')); ?>
+                    <?php echo wp_kses_post(get_option('paguro_msg_ui_privacy_notice', 'I tuoi dati saranno usati solo per la gestione del soggiorno.')); ?>
                 </p>
             </div>
         </div>

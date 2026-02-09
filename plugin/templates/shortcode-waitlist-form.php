@@ -37,17 +37,17 @@ function paguro_shortcode_waitlist_form() {
     <div class="paguro-form-wrapper paguro-waitlist-wrapper">
         <div class="paguro-form-card paguro-waitlist-card">
             <div class="paguro-form-header paguro-waitlist-header">
-                <h2>🔔 Lista d'Attesa</h2>
+                <h2>Lista d'attesa</h2>
                 <p class="paguro-form-subtitle"><?php echo esc_html(ucfirst($apt)); ?></p>
             </div>
             
             <div class="paguro-waitlist-info">
-                <p>Le date selezionate sono al momento occupate da un altro utente.</p>
+                <p>Il periodo selezionato risulta al momento occupato.</p>
                 <div class="paguro-form-dates">
-                    <strong>📅 Date Richieste:</strong>
+                    <strong>Periodo richiesto:</strong>
                     <span><?php echo esc_html($date_in); ?> — <?php echo esc_html($date_out); ?></span>
                 </div>
-                <p><strong>Iscriviti alla lista d'attesa:</strong> Ti avviseremo via email non appena il periodo si libererà!</p>
+                <p><strong>Iscriviti alla lista d'attesa:</strong> ti avviseremo appena si libera.</p>
             </div>
             
             <div class="paguro-form-body">
@@ -56,7 +56,7 @@ function paguro_shortcode_waitlist_form() {
                     <input type="hidden" name="is_waitlist" value="1">
                     
                     <div class="form-group">
-                        <label for="guest_name">Nome Completo *</label>
+                        <label for="guest_name">Nome e Cognome *</label>
                         <input type="text" id="guest_name" name="guest_name" required autocomplete="name">
                     </div>
                     
@@ -71,19 +71,19 @@ function paguro_shortcode_waitlist_form() {
                     </div>
                     
                     <div class="form-group">
-                        <label for="guest_notes">Note (opzionale)</label>
+                        <label for="guest_notes">Note (opzionali)</label>
                         <textarea id="guest_notes" name="guest_notes" rows="3" autocomplete="off"></textarea>
                     </div>
                     
                     <button type="submit" class="paguro-btn paguro-btn-secondary" id="paguro-submit-btn">
-                        ✅ Aggiungimi alla Lista d'Attesa
+                        Aggiungimi alla lista d'attesa
                     </button>
                     
                     <div id="paguro-form-msg" class="paguro-form-message"></div>
                 </form>
                 
                 <p class="paguro-form-privacy">
-                    <?php echo wp_kses_post(get_option('paguro_msg_ui_privacy_notice', 'I tuoi dati sono protetti.')); ?>
+                    <?php echo wp_kses_post(get_option('paguro_msg_ui_privacy_notice', 'I tuoi dati saranno usati solo per la gestione del soggiorno.')); ?>
                 </p>
             </div>
         </div>

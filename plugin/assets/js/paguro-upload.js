@@ -83,7 +83,11 @@ jQuery(document).ready(function($) {
     function handleFileUpload(file) {
         var token = $('#paguro-token').val();
         if (!token) {
-            alert('Token mancante');
+            if (window.paguroUi && typeof window.paguroUi.showMessage === 'function') {
+                window.paguroUi.showMessage(data.msgs.token_missing || 'Token mancante', 'error');
+            } else {
+                alert(data.msgs.token_missing || 'Token mancante');
+            }
             return;
         }
 
@@ -145,7 +149,7 @@ jQuery(document).ready(function($) {
 
     function showUploadLoading() {
         $('#paguro-upload-status').html(
-            '<div class="upload-spinner">⏳ Caricamento in corso...</div>'
+            '<div class="upload-spinner">' + (data.msgs.upload_loading || 'Caricamento...') + '</div>'
         ).css('color', 'blue');
     }
 
@@ -153,9 +157,10 @@ jQuery(document).ready(function($) {
         $('#paguro-upload-area').slideUp(300);
         $('#paguro-upload-status').html('');
 
-        var successHtml = '<h4>✅ Distinta Ricevuta!</h4>' +
-            '<p>Le date sono ora bloccate in attesa di validazione.</p>' +
-            '<a href="' + fileUrl + '" target="_blank" class="paguro-btn paguro-btn-secondary">📄 Visualizza File</a>';
+        var successHtml = '<h4>' + (data.msgs.upload_success_title || 'Distinta ricevuta') + '</h4>' +
+            '<p>' + (data.msgs.upload_success_text || 'Date bloccate in attesa di verifica.') + '</p>' +
+            '<a href="#" data-receipt-url="' + fileUrl + '" class="paguro-btn paguro-btn-secondary paguro-receipt-link">' +
+            (data.msgs.receipt_view_cta || 'Vedi distinta') + '</a>';
 
         if ($('#paguro-upload-success-container').length === 0) {
             $('<div id="paguro-upload-success-container" class="paguro-alert paguro-alert-success"></div>')
@@ -172,7 +177,7 @@ jQuery(document).ready(function($) {
 
     function showUploadError(msg) {
         $('#paguro-upload-status').html(
-            '<div class="upload-error">❌ ' + msg + '</div>'
+            '<div class="upload-error">Errore: ' + msg + '</div>'
         ).css('color', 'red');
     }
 

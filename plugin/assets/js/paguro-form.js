@@ -13,6 +13,13 @@ jQuery(document).ready(function($) {
         recaptcha_site: '',
         msgs: {}
     };
+    function showOverlayMessage(msg, type) {
+        if (window.paguroUi && typeof window.paguroUi.showMessage === 'function') {
+            window.paguroUi.showMessage(msg, type);
+        } else {
+            alert(msg);
+        }
+    }
 
     function refreshNonce() {
         return $.post(data.ajax_url, { action: 'paguro_refresh_nonce' }).then(function(res) {
@@ -193,16 +200,16 @@ jQuery(document).ready(function($) {
                         if (!triedRefresh && /sessione scaduta/i.test(errMsgRaw)) {
                             triedRefresh = true;
                             refreshNonce().then(sendWaitlist).catch(function() {
-                                alert("⚠️ " + errMsgRaw);
+                                showOverlayMessage("⚠️ " + errMsgRaw, 'error');
                                 btn.text(oldTxt).prop('disabled', false);
                             });
                             return;
                         }
-                        alert("⚠️ " + errMsgRaw);
+                        showOverlayMessage("⚠️ " + errMsgRaw, 'error');
                         btn.text(oldTxt).prop('disabled', false);
                     }
                 }).fail(function() {
-                    alert("❌ Errore di connessione");
+                    showOverlayMessage("❌ Errore di connessione", 'error');
                     btn.text(oldTxt).prop('disabled', false);
                 });
             });

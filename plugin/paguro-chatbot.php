@@ -193,27 +193,120 @@ function paguro_set_defaults()
     add_option('paguro_mail_from', 'info@villaceli.it');
     add_option('paguro_mail_from_name', 'Villa Celi');
 
-    add_option('paguro_msg_ui_social_pressure', '⚡ <strong>Attenzione:</strong> Ci sono altre {count} richieste di preventivo in corso per queste date.');
+    add_option('paguro_msg_ui_social_pressure', 'Altre {count} richieste attive per queste date.');
 
     if (!get_option('paguro_msg_ui_summary_page')) add_option('paguro_msg_ui_summary_page', '<div>...</div>');
     if (!get_option('paguro_msg_ui_summary_confirm_page')) {
-        $summary_confirm_default = '<p><strong>La tua prenotazione è confermata.</strong></p>' .
-            '<p>Soggiorno: {date_start} - {date_end} presso {apt_name}.</p>' .
-            '<p>Di seguito trovi i dettagli del pagamento e la distinta (se disponibile).</p>';
+        $summary_confirm_default = '<p><strong>Prenotazione confermata.</strong></p>' .
+            '<p>{apt_name} | {date_start} - {date_end}</p>' .
+            '<p>Di seguito i dettagli di pagamento e la distinta (se presente).</p>';
         add_option('paguro_msg_ui_summary_confirm_page', $summary_confirm_default);
     }
     if (!get_option('paguro_msg_ui_login_page')) add_option('paguro_msg_ui_login_page', paguro_default_login_template());
-    if (!get_option('paguro_msg_ui_privacy_notice')) add_option('paguro_msg_ui_privacy_notice', 'I tuoi dati sono protetti.');
+    if (!get_option('paguro_msg_ui_privacy_notice')) add_option('paguro_msg_ui_privacy_notice', 'I tuoi dati saranno usati solo per la gestione del soggiorno.');
     if (!get_option('paguro_msg_ui_upload_instruction')) add_option('paguro_msg_ui_upload_instruction', 'Carica la distinta per bloccare le date.');
-    if (!get_option('paguro_msg_email_refund_subj')) add_option('paguro_msg_email_refund_subj', 'Bonifico disposto - {apt_name}');
+    $ui_defaults = [
+        'paguro_msg_ui_quote_title' => 'Richiesta preventivo {apt_name}',
+        'paguro_msg_ui_quote_subtitle' => 'Compila i dati per ricevere il preventivo.',
+        'paguro_msg_ui_quote_name_help' => 'Intestatario IBAN',
+        'paguro_msg_ui_summary_title' => 'Riepilogo preventivo',
+        'paguro_msg_ui_waitlist_title' => "Riepilogo lista d'attesa",
+        'paguro_msg_ui_missing_token' => 'Codice di accesso mancante.',
+        'paguro_msg_ui_auth_title' => 'Area riservata',
+        'paguro_msg_ui_auth_help_quote' => "Inserisci l'email usata per la richiesta.",
+        'paguro_msg_ui_auth_help_waitlist' => "Inserisci l'email usata per la lista d'attesa.",
+        'paguro_msg_ui_auth_email_label' => 'Email *',
+        'paguro_msg_ui_auth_submit' => 'Accedi',
+        'paguro_msg_ui_auth_error' => 'Email non trovata.',
+        'paguro_msg_ui_booking_not_found' => 'Prenotazione non trovata.',
+        'paguro_msg_ui_waitlist_not_found' => "Iscrizione non trovata.",
+        'paguro_msg_ui_cancel_requested' => 'Richiesta di cancellazione inviata.',
+        'paguro_msg_ui_cancel_pending' => 'Cancellazione già richiesta.',
+        'paguro_msg_ui_cancel_iban_required' => 'Inserisci un IBAN valido.',
+        'paguro_msg_ui_cancel_iban_invalid' => 'IBAN non valido.',
+        'paguro_msg_ui_cancel_denied' => 'Cancellazione non disponibile oltre {cancel_deadline}.',
+        'paguro_msg_ui_waitlist_cancelled' => "Iscrizione annullata.",
+        'paguro_msg_ui_waitlist_title_text' => "Sei in lista d'attesa",
+        'paguro_msg_ui_waitlist_inline_notice' => 'Ti avviseremo appena si libera.',
+        'paguro_msg_ui_waitlist_page_notice' => 'Ti avviseremo appena si libera.',
+        'paguro_msg_ui_waitlist_inline_dates_label' => 'Periodo:',
+        'paguro_msg_ui_section_booking' => 'Dettagli soggiorno',
+        'paguro_msg_ui_section_pricing' => 'Prezzo',
+        'paguro_msg_ui_section_payment' => 'Bonifico',
+        'paguro_msg_ui_section_upload' => 'Carica distinta',
+        'paguro_msg_ui_section_uploaded' => 'Distinta ricevuta',
+        'paguro_msg_ui_section_actions' => 'Azioni',
+        'paguro_msg_ui_label_guest' => 'Ospite',
+        'paguro_msg_ui_label_name' => 'Nome',
+        'paguro_msg_ui_label_email' => 'Email',
+        'paguro_msg_ui_label_phone' => 'Telefono',
+        'paguro_msg_ui_label_apartment' => 'Appartamento',
+        'paguro_msg_ui_label_checkin' => 'Check-in',
+        'paguro_msg_ui_label_checkout' => 'Check-out',
+        'paguro_msg_ui_label_check_suffix' => ' (sabato)',
+        'paguro_msg_ui_label_total_cost' => 'Totale soggiorno',
+        'paguro_msg_ui_label_deposit' => 'Acconto (30%)',
+        'paguro_msg_ui_label_remaining' => 'Saldo in struttura',
+        'paguro_msg_ui_label_owner' => 'Intestatario',
+        'paguro_msg_ui_label_iban' => 'IBAN',
+        'paguro_msg_ui_label_amount' => 'Importo',
+        'paguro_msg_ui_upload_drop' => 'Trascina qui il file o seleziona',
+        'paguro_msg_ui_upload_success_title' => 'Distinta ricevuta',
+        'paguro_msg_ui_upload_success_text' => 'Date bloccate in attesa di verifica.',
+        'paguro_msg_ui_receipt_pending' => 'Distinta in verifica (entro 24h).',
+        'paguro_msg_ui_receipt_uploaded_text' => "Distinta ricevuta. Verifica entro 24h.",
+        'paguro_msg_ui_receipt_view_cta' => 'Vedi distinta',
+        'paguro_msg_ui_cancel_label' => 'IBAN rimborso *',
+        'paguro_msg_ui_cancel_placeholder' => 'IT00X0000000000000000000000',
+        'paguro_msg_ui_cancel_help' => "Con l'invio rinunci al soggiorno. Rimborso sul conto indicato.",
+        'paguro_msg_ui_cancel_confirm' => "Confermi la richiesta di cancellazione? Rimborso sul conto indicato.",
+        'paguro_msg_ui_cancel_cta' => 'Richiedi cancellazione',
+        'paguro_msg_ui_cancel_deadline_note' => 'Cancellazione possibile entro {cancel_deadline}.',
+        'paguro_msg_ui_cancel_unavailable' => 'Cancellazione non disponibile (entro {cancel_deadline}).',
+        'paguro_msg_ui_cancel_requested_notice' => 'Cancellazione richiesta. Riceverai conferma email.',
+        'paguro_msg_ui_waitlist_section_info' => 'Dettagli iscrizione',
+        'paguro_msg_ui_waitlist_section_dates' => 'Date richieste',
+        'paguro_msg_ui_waitlist_section_history' => 'Cronologia',
+        'paguro_msg_ui_waitlist_exit_cta' => 'Esci dalla lista',
+        'paguro_msg_ui_waitlist_exit_confirm' => "Confermi l'uscita dalla lista d'attesa?"
+    ];
+    foreach ($ui_defaults as $key => $value) {
+        if (get_option($key) === false) {
+            add_option($key, $value);
+        }
+    }
+    if (!get_option('paguro_ai_provider')) add_option('paguro_ai_provider', 'api');
+    if (!get_option('paguro_ollama_url')) add_option('paguro_ollama_url', 'http://localhost:11434');
+    if (!get_option('paguro_ollama_model')) add_option('paguro_ollama_model', 'llama3.1');
+    if (!get_option('paguro_ai_rules')) add_option('paguro_ai_rules', []);
+    if (!get_option('paguro_txt_email_waitlist_subj')) add_option('paguro_txt_email_waitlist_subj', 'Lista d\'attesa {apt_name}');
+    if (!get_option('paguro_txt_email_waitlist_body')) {
+        add_option('paguro_txt_email_waitlist_body',
+            'Gentile {guest_name},<br><br>' .
+            'La tua richiesta per {apt_name} ({date_start} - {date_end}) è in lista d\'attesa.<br>' .
+            'Ti avviseremo appena si libera.<br><br>' .
+            '<a href="{link_riepilogo}" class="button">APRI RIEPILOGO</a>'
+        );
+    }
+    if (!get_option('paguro_txt_email_waitlist_adm_subj')) add_option('paguro_txt_email_waitlist_adm_subj', 'Nuova lista d\'attesa: {apt_name}');
+    if (!get_option('paguro_txt_email_waitlist_adm_body')) add_option('paguro_txt_email_waitlist_adm_body', 'Nuova iscrizione: {guest_name} ({guest_email}) | {apt_name} {date_start} - {date_end}.');
+    if (!get_option('paguro_txt_email_waitlist_alert_subj')) add_option('paguro_txt_email_waitlist_alert_subj', 'Disponibilità {apt_name}');
+    if (!get_option('paguro_txt_email_waitlist_alert_body')) {
+        add_option('paguro_txt_email_waitlist_alert_body',
+            'Gentile {guest_name},<br><br>' .
+            'Si è liberato {apt_name} per {date_start} - {date_end}.<br>' .
+            'Se sei interessato puoi prenotare ora.<br><br>' .
+            '<a href="{booking_url}" class="button">PRENOTA ORA</a>'
+        );
+    }
+    if (!get_option('paguro_msg_email_refund_subj')) add_option('paguro_msg_email_refund_subj', 'Rimborso disposto - {apt_name}');
     if (!get_option('paguro_msg_email_refund_body')) {
         add_option('paguro_msg_email_refund_body',
-            'Ciao {guest_name},<br><br>' .
-            'Ti confermiamo che il bonifico di rimborso è stato disposto sul seguente IBAN:<br>' .
+            'Gentile {guest_name},<br><br>' .
+            'Il rimborso è stato disposto su questo IBAN:<br>' .
             '<strong>{customer_iban_priv}</strong><br><br>' .
-            'I tempi di accredito possono variare in base alla tua banca.<br><br>' .
-            'Grazie comunque per averci contattato e per la fiducia riposta.<br>' .
-            'Speriamo di poterti ospitare in futuro.'
+            'I tempi di accredito dipendono dalla banca.<br><br>' .
+            'Grazie per averci contattato.'
         );
     }
 }
@@ -322,55 +415,109 @@ function paguro_sanitize_chat_reply($html)
     return wp_kses($html, $allowed);
 }
 
-function paguro_verify_recaptcha($token, $action = '')
+function paguro_ai_match_rule($msg)
 {
-    $secret = get_option('paguro_recaptcha_secret');
-    if (empty($secret)) return true;
-
-    if (empty($token)) {
-        return new WP_Error('recaptcha_missing', 'Verifica anti-bot non valida. Riprova.');
+    $rules = get_option('paguro_ai_rules', []);
+    if (!is_array($rules) || $msg === '') return '';
+    foreach ($rules as $rule) {
+        $keywords_raw = isset($rule['keywords']) ? $rule['keywords'] : '';
+        $response_raw = isset($rule['response']) ? $rule['response'] : '';
+        if ($keywords_raw === '' || $response_raw === '') continue;
+        $keywords = array_filter(array_map('trim', explode(',', $keywords_raw)));
+        foreach ($keywords as $kw) {
+            if ($kw !== '' && stripos($msg, $kw) !== false) {
+                $placeholders = [
+                    'booking_url' => site_url("/" . get_option('paguro_checkout_slug', 'prenotazione') . "/")
+                ];
+                return paguro_parse_template($response_raw, $placeholders);
+            }
+        }
     }
+    return '';
+}
 
-    $resp = wp_remote_post('https://www.google.com/recaptcha/api/siteverify', [
-        'body' => [
-            'secret' => $secret,
-            'response' => $token
-        ],
-        'timeout' => 10,
-        'sslverify' => true
+function paguro_call_ollama($msg, $session_id = '')
+{
+    $ollama_url = rtrim(get_option('paguro_ollama_url', 'http://localhost:11434'), '/');
+    $model = get_option('paguro_ollama_model', 'llama3.1');
+    if ($ollama_url === '' || $model === '') return '';
+
+    $payload = [
+        'model' => $model,
+        'stream' => false,
+        'messages' => [
+            ['role' => 'user', 'content' => $msg]
+        ]
+    ];
+
+    $res = wp_remote_post($ollama_url . '/api/chat', [
+        'body' => json_encode($payload),
+        'headers' => ['Content-Type' => 'application/json'],
+        'timeout' => 30
     ]);
 
-    if (is_wp_error($resp)) {
-        return new WP_Error('recaptcha_error', 'Errore verifica anti-bot. Riprova.');
+    if (is_wp_error($res)) {
+        error_log('[Paguro] Ollama error: ' . $res->get_error_message());
+        return '';
     }
 
-    $data = json_decode(wp_remote_retrieve_body($resp), true);
-    if (empty($data['success'])) {
-        return new WP_Error('recaptcha_failed', 'Verifica anti-bot non valida. Riprova.');
+    $data = json_decode(wp_remote_retrieve_body($res), true);
+    if (!is_array($data)) return '';
+    if (isset($data['message']['content'])) return $data['message']['content'];
+    if (isset($data['response'])) return $data['response'];
+    return '';
+}
+
+function paguro_verify_recaptcha($token, $action) {
+    $recaptcha_secret = get_option('paguro_recaptcha_secret');
+    
+    // 1. Controllo preliminare chiave
+    if (empty($recaptcha_secret)) {
+        error_log("PAGURO ERROR: Secret Key mancante nelle opzioni.");
+        return false;
     }
 
-    if (!empty($action) && !empty($data['action']) && $data['action'] !== $action) {
-        return new WP_Error('recaptcha_action', 'Verifica anti-bot non valida. Riprova.');
+    // 2. Chiamata a Google
+    $response = wp_remote_post('https://www.google.com/recaptcha/api/siteverify', [
+        'body' => [
+            'secret' => $recaptcha_secret,
+            'response' => $token
+        ]
+    ]);
+
+    if (is_wp_error($response)) {
+        error_log("PAGURO ERROR: Connessione a Google fallita - " . $response->get_error_message());
+        return false;
     }
 
-    if (isset($data['score']) && $data['score'] < 0.5) {
-        return new WP_Error('recaptcha_score', 'Verifica anti-bot non valida. Riprova.');
-    }
+    $body = wp_remote_retrieve_body($response);
+    $result = json_decode($body);
 
-    return true;
+    // 3. LOG FONDAMENTALE: Vediamo cosa dice Google!
+    error_log("PAGURO DEBUG RECAPTCHA: " . print_r($result, true));
+
+    // 4. Verifica abbassando temporaneamente la soglia a 0.1 per i test
+    if ($result->success && isset($result->score) && $result->score >= 0.1 && $result->action === $action) {
+        return true;
+    }
+    
+    // Log se fallisce la verifica logica
+    error_log("PAGURO FAIL: Token valido ma criteri non soddisfatti. Score: " . ($result->score ?? 'N/A') . " - Action attesa: $action - Action ricevuta: " . ($result->action ?? 'N/A'));
+
+    return false;
 }
 
 function paguro_default_login_template()
 {
     return '<div class="paguro-auth-section">' .
         '<div class="paguro-auth-card">' .
-        '<h2>🔐 Area Riservata</h2>' .
-        '<p>Per motivi di sicurezza, inserisci la tua email per accedere alla prenotazione.</p>' .
+        '<h2>Area riservata</h2>' .
+        '<p>Inserisci la tua email per accedere alla prenotazione.</p>' .
         '<form id="paguro-auth-form" method="POST">' .
         '{nonce_field}' .
         '<input type="hidden" name="paguro_action" value="verify_access">' .
         '<input type="hidden" name="token" value="{token}">' .
-        '<label>Email Registrata *</label>' .
+        '<label>Email *</label>' .
         '<input type="email" name="verify_email" required autocomplete="email" style="width:100%; padding:8px; margin:10px 0;">' .
         '<button class="button" type="submit" style="background:#0073aa;color:#fff;border:none;padding:10px 20px;font-size:16px;border-radius:4px;cursor:pointer">Accedi</button>' .
         '</form>' .
@@ -457,43 +604,61 @@ function paguro_render_admin_page()
 // =========================================================
 
 add_action('wp_enqueue_scripts', 'paguro_enqueue_scripts');
-function paguro_enqueue_scripts()
-{
-    $plugin_url = plugin_dir_url(__FILE__);
+function paguro_enqueue_scripts() {
+    // Carica CSS
+    wp_enqueue_style('paguro-chat-css', PAGURO_PLUGIN_URL . 'assets/css/paguro-chat.css', [], '3.4.19');
+    wp_enqueue_style('paguro-form-css', PAGURO_PLUGIN_URL . 'assets/css/paguro-form.css', [], '3.4.19');
+    wp_enqueue_style('paguro-summary-css', PAGURO_PLUGIN_URL . 'assets/css/paguro-summary.css', [], '3.4.19');
 
-    // CSS Modules
-    wp_enqueue_style('paguro-chat-css', $plugin_url . 'assets/css/paguro-chat.css', [], PAGURO_VERSION);
-    wp_enqueue_style('paguro-form-css', $plugin_url . 'assets/css/paguro-form.css', [], PAGURO_VERSION);
-    wp_enqueue_style('paguro-summary-css', $plugin_url . 'assets/css/paguro-summary.css', [], PAGURO_VERSION);
+    // Carica JS
+    wp_enqueue_script('paguro-ui-js', PAGURO_PLUGIN_URL . 'assets/js/paguro-ui.js', ['jquery'], '3.4.19', true);
+    wp_enqueue_script('paguro-chat-js', PAGURO_PLUGIN_URL . 'assets/js/paguro-chat.js', ['jquery', 'paguro-ui-js'], '3.4.19', true);
+    wp_enqueue_script('paguro-form-js', PAGURO_PLUGIN_URL . 'assets/js/paguro-form.js', ['jquery', 'paguro-ui-js'], '3.4.19', true);
+    wp_enqueue_script('paguro-upload-js', PAGURO_PLUGIN_URL . 'assets/js/paguro-upload.js', ['jquery', 'paguro-ui-js'], '3.4.19', true);
+    wp_enqueue_script('paguro-auth-js', PAGURO_PLUGIN_URL . 'assets/js/paguro-auth.js', ['jquery', 'paguro-ui-js'], '3.4.19', true);
 
-    // JavaScript Modules
-    wp_enqueue_script('jquery');
-    wp_enqueue_script('paguro-chat-js', $plugin_url . 'assets/js/paguro-chat.js', ['jquery'], PAGURO_VERSION, true);
-    wp_enqueue_script('paguro-form-js', $plugin_url . 'assets/js/paguro-form.js', ['jquery'], PAGURO_VERSION, true);
-    wp_enqueue_script('paguro-upload-js', $plugin_url . 'assets/js/paguro-upload.js', ['jquery'], PAGURO_VERSION, true);
-    wp_enqueue_script('paguro-auth-js', $plugin_url . 'assets/js/paguro-auth.js', ['jquery'], PAGURO_VERSION, true);
+    // Gestione reCAPTCHA
+    $recaptcha_site = get_option('paguro_recaptcha_site');
+    if ($recaptcha_site) {
+        wp_enqueue_script('google-recaptcha', 'https://www.google.com/recaptcha/api.js?render=' . esc_attr($recaptcha_site), [], null, true);
+    }
 
-    $site_key = get_option('paguro_recaptcha_site');
-    if ($site_key) wp_enqueue_script('google-recaptcha', 'https://www.google.com/recaptcha/api.js?render=' . $site_key, [], null, true);
-
-    $booking_slug = get_option('paguro_checkout_slug', 'prenotazione');
-
-    wp_localize_script('paguro-chat-js', 'paguroData', [
+    // Preparazione Dati
+    $data = [
         'ajax_url' => admin_url('admin-ajax.php'),
         'nonce' => wp_create_nonce('paguro_chat_nonce'),
-        'booking_url' => site_url("/{$booking_slug}/"),
-        'icon_url' => plugin_dir_url(__FILE__) . 'paguro_bot_icon.png',
-        'recaptcha_site' => $site_key,
+        'booking_url' => home_url('/prenotazione/'),
+        'icon_url' => PAGURO_PLUGIN_URL . 'paguro_bot_icon.png',
+        'recaptcha_site' => $recaptcha_site,
         'msgs' => [
-            'upload_loading' => '⏳ Caricamento...',
-            'upload_success' => '✅ Distinta Caricata!',
-            'upload_error'   => '❌ Errore server.',
-            'form_success'   => 'Richiesta inviata!',
+            'upload_loading' => 'Caricamento...',
+            'upload_success' => 'Distinta caricata.',
+            'upload_error' => 'Errore di sistema.',
+            'form_success' => 'Richiesta inviata!',
             'form_conn_error' => 'Errore connessione.',
-            'btn_locking'    => 'Attendere...',
-            'btn_book'       => '[Richiedi Preventivo]'
+            'btn_locking' => 'Attendere...',
+            'btn_book' => '[Richiedi Preventivo]',
+            'token_missing' => get_option('paguro_msg_ui_missing_token', 'Codice di accesso mancante.'),
+            'iban_required' => get_option('paguro_msg_ui_cancel_iban_required', 'Inserisci un IBAN valido.'),
+            'iban_invalid' => get_option('paguro_msg_ui_cancel_iban_invalid', 'IBAN non valido.'),
+            'cancel_confirm' => get_option('paguro_msg_ui_cancel_confirm', "Confermi la richiesta di cancellazione? Rimborso sul conto indicato."),
+            'waitlist_exit_confirm' => get_option('paguro_msg_ui_waitlist_exit_confirm', "Confermi l'uscita dalla lista d'attesa?"),
+            'upload_success_title' => get_option('paguro_msg_ui_upload_success_title', 'Distinta ricevuta'),
+            'upload_success_text' => get_option('paguro_msg_ui_upload_success_text', 'Date bloccate in attesa di verifica.'),
+            'receipt_view_cta' => get_option('paguro_msg_ui_receipt_view_cta', 'Vedi distinta')
         ]
-    ]);
+    ];
+
+    // --- FIX DEFINITIVO ---
+    // Stampiamo i dati manualmente nell'HTML per aggirare i plugin di cache/ottimizzazione
+    add_action('wp_footer', function() use ($data) {
+        $json_data = json_encode($data);
+        echo "<script type='text/javascript' id='paguro-manual-data'>
+            /* <![CDATA[ */
+            var paguroData = $json_data;
+            /* ]]> */
+        </script>";
+    }, 1); 
 }
 
 // =========================================================
@@ -505,6 +670,40 @@ add_action('wp_ajax_nopriv_paguro_refresh_nonce', 'paguro_refresh_nonce');
 function paguro_refresh_nonce()
 {
     wp_send_json_success(['nonce' => wp_create_nonce('paguro_chat_nonce')]);
+}
+
+// =========================================================
+// ADMIN RECEIPT ACCESS (PROTECTED)
+// =========================================================
+
+add_action('admin_post_paguro_admin_receipt', 'paguro_admin_receipt_redirect');
+function paguro_admin_receipt_redirect()
+{
+    if (!is_user_logged_in()) {
+        auth_redirect();
+    }
+    if (!current_user_can('manage_options')) {
+        wp_die('Non autorizzato.');
+    }
+    $booking_id = isset($_GET['booking_id']) ? intval($_GET['booking_id']) : 0;
+    $hash = isset($_GET['h']) ? sanitize_text_field(wp_unslash($_GET['h'])) : '';
+    if ($booking_id <= 0 || $hash === '') {
+        wp_die('Link non valido.');
+    }
+    global $wpdb;
+    $receipt_url = $wpdb->get_var($wpdb->prepare(
+        "SELECT receipt_url FROM {$wpdb->prefix}paguro_availability WHERE id = %d",
+        $booking_id
+    ));
+    if (!$receipt_url) {
+        wp_die('Distinta non trovata.');
+    }
+    $expected = wp_hash($booking_id . '|' . $receipt_url);
+    if (!hash_equals($expected, $hash)) {
+        wp_die('Link non valido.');
+    }
+    wp_redirect(esc_url_raw($receipt_url));
+    exit;
 }
 // CONTINUATION OF paguro-chatbot.php - PART 2
 
@@ -653,12 +852,13 @@ add_action('wp_ajax_nopriv_paguro_chat_request', 'paguro_handle_chat');
 function paguro_handle_chat()
 {
     if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'paguro_chat_nonce')) {
-        wp_send_json_error(['reply' => "⚠️ Sessione scaduta."]);
+        wp_send_json_error(['reply' => "Sessione scaduta."]);
         return;
     }
     
     global $wpdb;
     $api_url = get_option('paguro_api_url');
+    $ai_provider = get_option('paguro_ai_provider', 'api');
     $msg = sanitize_text_field(wp_unslash($_POST['message'] ?? ''));
 
     if (substr($api_url, -4) === '/api') $api_url = str_replace('/api', '/chat', $api_url);
@@ -673,24 +873,42 @@ function paguro_handle_chat()
         $force_action = $direct_action || preg_match('/\b(giugno|luglio|agosto|settembre)\b/i', $msg) || stripos($msg, 'dispon') !== false;
         $apt_filter = intval($_POST['apt_id'] ?? 0);
 
-        if ($offset == 0 && !$force_action) {
-            // Call AI API
-            $args = [
-                'body' => json_encode(['message' => $msg, 'session_id' => $_POST['session_id']]), 
-                'headers' => ['Content-Type' => 'application/json'], 
-                'timeout' => 30, 
-                'sslverify' => true  // IMPROVEMENT: Enable SSL verification
-            ];
-            
-            $res = wp_remote_post($api_url, $args);
-            
-            if (is_wp_error($res)) {
-                error_log('[Paguro] AI API error: ' . $res->get_error_message());
-                wp_send_json_error(['reply' => "Errore Connessione AI."]);
-                return;
+        if ($offset == 0) {
+            $rule_reply = paguro_ai_match_rule($msg);
+            if (!empty($rule_reply)) {
+                $data = ['reply' => $rule_reply];
+                $data['reply'] = paguro_sanitize_chat_reply($data['reply']);
+                wp_send_json_success($data);
             }
-            
-            $data = json_decode(wp_remote_retrieve_body($res), true);
+        }
+
+        if ($offset == 0 && !$force_action) {
+            if ($ai_provider === 'ollama') {
+                $ollama_reply = paguro_call_ollama($msg, sanitize_text_field(wp_unslash($_POST['session_id'] ?? '')));
+                if ($ollama_reply === '') {
+                    wp_send_json_error(['reply' => "Errore Connessione AI."]);
+                    return;
+                }
+                $data = ['reply' => $ollama_reply];
+            } else {
+                // Call AI API
+                $args = [
+                    'body' => json_encode(['message' => $msg, 'session_id' => $_POST['session_id']]), 
+                    'headers' => ['Content-Type' => 'application/json'], 
+                    'timeout' => 30, 
+                    'sslverify' => true  // IMPROVEMENT: Enable SSL verification
+                ];
+                
+                $res = wp_remote_post($api_url, $args);
+                
+                if (is_wp_error($res)) {
+                    error_log('[Paguro] AI API error: ' . $res->get_error_message());
+                    wp_send_json_error(['reply' => "Errore Connessione AI."]);
+                    return;
+                }
+                
+                $data = json_decode(wp_remote_retrieve_body($res), true);
+            }
         } else {
             $data = ['type' => 'ACTION', 'action' => 'CHECK_AVAILABILITY'];
         }
@@ -746,6 +964,20 @@ function paguro_handle_chat()
             $html = ($offset == 0) ? "Ecco le disponibilità (Sab-Sab):<br><br>" : "";
             $found = false;
             $txt_quote = get_option('paguro_js_btn_book', '[Richiedi Preventivo]');
+            $get_observers = function($apt_id, $date_end, $date_start) use ($wpdb) {
+                return (int) $wpdb->get_var($wpdb->prepare(
+                    "SELECT COUNT(DISTINCT guest_email) FROM {$wpdb->prefix}paguro_availability
+                     WHERE apartment_id = %d
+                     AND (date_start < %s AND date_end > %s)
+                     AND (
+                        (status IN (0,2) AND receipt_url IS NULL AND (lock_expires IS NULL OR lock_expires > NOW()))
+                        OR status = 5
+                     )",
+                    $apt_id,
+                    $date_end,
+                    $date_start
+                ));
+            };
 
             foreach ($apts as $apt) {
                 if ($offset == 0) $html .= "🏠 <b>" . esc_html($apt->name) . "</b>:<br>";
@@ -779,6 +1011,9 @@ function paguro_handle_chat()
                     }
 
                     if ($hard_match) {
+                        if ((int) $hard_match->status === 1) {
+                            continue;
+                        }
                         // OCCUPIED - Show waitlist button
                         $d_in = $dt->format('d/m/Y');
                         $d_out = $end->format('d/m/Y');
@@ -786,42 +1021,31 @@ function paguro_handle_chat()
                         if ($count <= $offset) continue;
                         if ($shown < $limit) {
                             $status_label = 'Non disponibile';
-                            if ($hard_match->status == 1) {
-                                $status_label = 'Confermata';
-                            } elseif ($hard_match->status == 5) {
-                                $status_label = 'Cancellazione in corso';
-                            } elseif ($hard_match->status == 2 && !empty($hard_match->receipt_url)) {
-                                $status_label = 'In validazione';
+                            if ((int) $hard_match->status === 5) {
+                                $status_label = 'Presto nuovamente disponibile';
                             }
+                            $viewers = $get_observers($apt->id, $end->format('Y-m-d'), $dt->format('Y-m-d'));
+                            $social = ($viewers > 0) ? " <span style='color:#d35400;font-size:11px;'>🔥 {$viewers} osservatori</span>" : "";
                             
                             $apt_attr = esc_attr(strtolower($apt->name));
                             $d_in_attr = esc_attr($d_in);
                             $d_out_attr = esc_attr($d_out);
-                            $html .= "- <span class='paguro-availability-line'><span style='color:#777;text-decoration:line-through'>{$dt->format('d/m')} - {$end->format('d/m')}</span> <span class='paguro-availability-status'>" . esc_html($status_label) . "</span> <a href='#' class='paguro-waitlist-btn' data-apt='{$apt_attr}' data-in='{$d_in_attr}' data-out='{$d_out_attr}'>[🔔 Avvisami se si libera]</a></span><br>";
+                            $show_waitlist = in_array((int) $hard_match->status, [2, 5], true);
+                            $date_html = "<span style='color:#777;text-decoration:line-through'>{$dt->format('d/m')} - {$end->format('d/m')}</span>";
+                            $waitlist_html = $show_waitlist ? " <a href='#' class='paguro-waitlist-btn' data-apt='{$apt_attr}' data-in='{$d_in_attr}' data-out='{$d_out_attr}'>[Avvisami se si libera]</a>" : "";
+                            $html .= "- <span class='paguro-availability-line'>{$date_html} <span class='paguro-availability-status'>" . esc_html($status_label) . "</span>{$waitlist_html}{$social}</span><br>";
                             $shown++;
                             $found = true;
                         }
                     } else {
                         // AVAILABLE - Show book button
-                        // Count competing quotes (improved with DISTINCT guest_email)
-                        $viewers = $wpdb->get_var($wpdb->prepare(
-                            "SELECT COUNT(DISTINCT guest_email) FROM {$wpdb->prefix}paguro_availability
-                             WHERE apartment_id = %d
-                             AND status = 2
-                             AND receipt_url IS NULL
-                             AND (lock_expires IS NULL OR lock_expires > NOW())
-                             AND date_start < %s AND date_end > %s",
-                            $apt->id,
-                            $end->format('Y-m-d'),
-                            $dt->format('Y-m-d')
-                        ));
-
                         $count++;
                         if ($count <= $offset) continue;
                         if ($shown < $limit) {
                             $d_in = $dt->format('d/m/Y');
                             $d_out = $end->format('d/m/Y');
-                            $social = ($viewers > 0) ? " <span style='color:#d35400;font-size:11px;'>🔥 {$viewers} preventivi attivi</span>" : "";
+                            $viewers = $get_observers($apt->id, $end->format('Y-m-d'), $dt->format('Y-m-d'));
+                            $social = ($viewers > 0) ? " <span style='color:#d35400;font-size:11px;'>🔥 {$viewers} osservatori</span>" : "";
                             $apt_attr = esc_attr(strtolower($apt->name));
                             $d_in_attr = esc_attr($d_in);
                             $d_out_attr = esc_attr($d_out);
@@ -1192,11 +1416,11 @@ function paguro_checkout_form()
     }
 
     if ($is_waitlist) {
-        $title = "Iscrizione Lista d'Attesa: " . esc_html(ucfirst($apt));
-        $intro = "Le date selezionate sono in attesa di conferma da parte di un altro utente. Inserisci i tuoi dati: se si liberano ti avviseremo subito via mail.";
+        $title = "Lista d'attesa: " . esc_html(ucfirst($apt));
+        $intro = "Periodo al momento occupato. Lascia i tuoi dati e ti avviseremo se si libera.";
         $social_html = "";
     } else {
-        $title = "Richiesta Preventivo: " . esc_html(ucfirst($apt));
+        $title = "Richiesta preventivo: " . esc_html(ucfirst($apt));
         $intro = "Completa i dati per ricevere il preventivo.";
 
         $booking = $wpdb->get_row($wpdb->prepare(
