@@ -140,7 +140,8 @@ function paguro_create_tables()
 
     // Status: 1=Confermato, 2=Preventivo(Soft), 3=Cancellato, 4=Waitlist, 5=Richiesta Cancellazione
     $sql2 = "CREATE TABLE IF NOT EXISTS {$wpdb->prefix}paguro_availability (
-        id mediumint(9) AUTO_INCREMENT, apartment_id mediumint(9), date_start date, date_end date, 
+        id mediumint(9) AUTO_INCREMENT, apartment_id mediumint(9), date_start date, date_end date,
+        manual_price decimal(10,2) NULL,
         status tinyint(1) DEFAULT 0, guest_name varchar(100), guest_email varchar(100), guest_phone varchar(50), 
         customer_iban varchar(34),
         guest_notes text, history_log longtext,
@@ -182,6 +183,10 @@ function paguro_maybe_upgrade_schema()
     $group_seq_col = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM {$table} LIKE %s", 'group_seq'));
     if (!$group_seq_col) {
         $wpdb->query("ALTER TABLE {$table} ADD group_seq int NULL");
+    }
+    $price_col = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM {$table} LIKE %s", 'manual_price'));
+    if (!$price_col) {
+        $wpdb->query("ALTER TABLE {$table} ADD manual_price decimal(10,2) NULL");
     }
 
     $btn_label = get_option('paguro_js_btn_book', '');
@@ -262,6 +267,8 @@ function paguro_set_defaults()
         'paguro_msg_ui_section_upload' => 'Carica distinta',
         'paguro_msg_ui_section_uploaded' => 'Distinta ricevuta',
         'paguro_msg_ui_section_actions' => 'Azioni',
+        'paguro_msg_ui_group_actions_ready' => 'Gestisci le date',
+        'paguro_msg_ui_group_actions_locked' => "Quest'area sarà disponibile dopo aver caricato la distinta.",
         'paguro_msg_ui_label_guest' => 'Ospite',
         'paguro_msg_ui_label_name' => 'Nome',
         'paguro_msg_ui_label_email' => 'Email',
@@ -414,7 +421,12 @@ function paguro_parse_template($text, $data)
 {
     if (empty($text)) return '';
     foreach ($data as $key => $val) {
-        $text = str_replace('{' . $key . '}', (string)$val, $text);
+        $value = (string) $val;
+        $text = str_replace('{' . $key . '}', $value, $text);
+        $upper = strtoupper((string) $key);
+        if ($upper !== $key) {
+            $text = str_replace('{' . $upper . '}', $value, $text);
+        }
     }
     return $text;
 }

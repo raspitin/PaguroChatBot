@@ -173,6 +173,23 @@ jQuery(document).ready(function($) {
 
         // Disabilita input file
         $('#paguro-file-input').prop('disabled', true);
+
+        // Sblocca dinamicamente le date (multi-settimana)
+        var $actionsNote = $('.paguro-group-actions-note');
+        if ($actionsNote.length) {
+            var readyText = $actionsNote.data('ready');
+            if (readyText) {
+                $actionsNote.text(readyText);
+            }
+        }
+        $('.paguro-group-actions-detail').show();
+        $('.paguro-group-action-link.is-disabled').each(function() {
+            $(this)
+                .removeClass('is-disabled')
+                .removeAttr('data-disabled')
+                .removeAttr('aria-disabled')
+                .removeAttr('tabindex');
+        });
     }
 
     function showUploadError(msg) {

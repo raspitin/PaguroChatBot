@@ -61,7 +61,9 @@ function paguro_shortcode_summary_quote() {
         'cancel_deadline_note' => get_option('paguro_msg_ui_cancel_deadline_note', 'Cancellazione possibile entro {cancel_deadline}.'),
         'cancel_unavailable' => get_option('paguro_msg_ui_cancel_unavailable', 'Cancellazione non disponibile (entro {cancel_deadline}).'),
         'cancel_requested_notice' => get_option('paguro_msg_ui_cancel_requested_notice', 'Cancellazione richiesta. Riceverai conferma email.'),
-        'group_week_confirm' => get_option('paguro_msg_ui_group_week_confirm', 'Attenzione: se annulli una settimana, il preventivo verrà ricalcolato e lo sconto multi‑settimana non sarà applicato.')
+        'group_week_confirm' => get_option('paguro_msg_ui_group_week_confirm', 'Attenzione: se annulli una settimana, il preventivo verrà ricalcolato e lo sconto multi‑settimana non sarà applicato.'),
+        'group_actions_ready' => get_option('paguro_msg_ui_group_actions_ready', 'Gestisci le date'),
+        'group_actions_locked' => get_option('paguro_msg_ui_group_actions_locked', "Quest'area sarà disponibile dopo aver caricato la distinta.")
     ];
     
     ob_start(); ?>
@@ -167,11 +169,15 @@ function paguro_shortcode_summary_quote() {
                                     }
                                 }
                                 $group_status = $all_cancelled ? 'Cancellata' : ($all_confirmed ? 'Confermata' : ($any_confirmed ? 'Parziale' : 'Preventivo'));
+                                $is_multi_week = ($totals['weeks_count'] > 1);
+                                $can_manage_weeks = !empty($receipt_url);
                                 ?>
                                 <div class="paguro-group-summary">
-                                    <div class="paguro-alert paguro-alert-info" style="margin-bottom:15px;">
-                                        Prenotazione multi‑settimana (<?php echo esc_html($group_status); ?>)
-                                    </div>
+                                    <?php if ($is_multi_week): ?>
+                                        <div class="paguro-alert paguro-alert-info" style="margin-bottom:15px;">
+                                            Prenotazione multi‑settimana (<?php echo esc_html($group_status); ?>)
+                                        </div>
+                                    <?php endif; ?>
 
                                     <div class="paguro-section paguro-section-info">
                                         <h3><?php echo esc_html($ui['section_booking']); ?></h3>
@@ -201,7 +207,7 @@ function paguro_shortcode_summary_quote() {
                                             <?php foreach ($totals['weeks'] as $w) { ?>
                                                 <li>
                                                     <?php echo esc_html(date('d/m/Y', strtotime($w['date_start'])) . ' — ' . date('d/m/Y', strtotime($w['date_end']))); ?>
-                                                    <span class="paguro-group-week-price">€ <?php echo number_format($w['price'], 2, ',', '.'); ?></span>
+                                                    <span class="paguro-group-week-price">€ <?php echo number_format($w['price'], 0, ',', '.'); ?></span>
                                                 </li>
                                             <?php } ?>
                                         </ul>
@@ -218,25 +224,25 @@ function paguro_shortcode_summary_quote() {
                                             <div class="paguro-pricing-table">
                                             <div class="pricing-row">
                                                 <span class="pricing-label">Totale settimane</span>
-                                                <span class="pricing-value">€ <?php echo number_format($total_raw, 2, ',', '.'); ?></span>
+                                                <span class="pricing-value">€ <?php echo number_format($total_raw, 0, ',', '.'); ?></span>
                                             </div>
                                             <?php if ($discount > 0): ?>
                                                 <div class="pricing-row">
                                                     <span class="pricing-label">Sconto multi‑settimana</span>
-                                                    <span class="pricing-value">− € <?php echo number_format($discount, 2, ',', '.'); ?></span>
+                                                    <span class="pricing-value">− € <?php echo number_format($discount, 0, ',', '.'); ?></span>
                                                 </div>
                                             <?php endif; ?>
                                             <div class="pricing-row pricing-highlight">
                                                 <span class="pricing-label"><strong><?php echo esc_html(paguro_parse_template($ui['label_deposit'], ['deposit_percent' => $deposit_percent])); ?></strong></span>
-                                                <span class="pricing-value"><strong>€ <?php echo number_format($deposit, 2, ',', '.'); ?></strong></span>
+                                                <span class="pricing-value"><strong>€ <?php echo number_format($deposit, 0, ',', '.'); ?></strong></span>
                                             </div>
                                             <div class="pricing-row">
                                                 <span class="pricing-label"><?php echo esc_html($ui['label_remaining']); ?></span>
-                                                <span class="pricing-value">€ <?php echo number_format($remaining, 2, ',', '.'); ?></span>
+                                                <span class="pricing-value">€ <?php echo number_format($remaining, 0, ',', '.'); ?></span>
                                             </div>
                                             <div class="pricing-row">
                                                 <span class="pricing-label"><?php echo esc_html($ui['label_total_cost']); ?></span>
-                                                <span class="pricing-value"><strong>€ <?php echo number_format($total_final, 2, ',', '.'); ?></strong></span>
+                                                <span class="pricing-value"><strong>€ <?php echo number_format($total_final, 0, ',', '.'); ?></strong></span>
                                             </div>
                                         </div>
                                         </div>
@@ -262,7 +268,7 @@ function paguro_shortcode_summary_quote() {
                                                     </div>
                                                     <div class="bank-item">
                                                         <label><?php echo esc_html($ui['label_amount']); ?></label>
-                                                        <strong>€ <?php echo number_format($deposit, 2, ',', '.'); ?></strong>
+                                                        <strong>€ <?php echo number_format($deposit, 0, ',', '.'); ?></strong>
                                                     </div>
                                                 </div>
                                             </div>
@@ -317,11 +323,21 @@ function paguro_shortcode_summary_quote() {
 
                                     <div class="paguro-section paguro-section-actions">
                                         <h3><?php echo esc_html($ui['section_actions']); ?></h3>
-                                        <p>Per gestire o cancellare una singola settimana, apri il dettaglio:</p>
+                                        <p class="paguro-group-actions-note"
+                                           data-ready="<?php echo esc_attr($ui['group_actions_ready']); ?>"
+                                           data-locked="<?php echo esc_attr($ui['group_actions_locked']); ?>">
+                                            <?php echo esc_html($can_manage_weeks ? $ui['group_actions_ready'] : $ui['group_actions_locked']); ?>
+                                        </p>
+                                        <p class="paguro-group-actions-detail" <?php echo $can_manage_weeks ? '' : 'style="display:none;"'; ?>>
+                                            Per gestire o cancellare una singola settimana, apri il dettaglio:
+                                        </p>
                                         <ul class="paguro-group-actions">
                                             <?php foreach ($group_bookings as $gb) { ?>
                                                 <li>
-                                                    <a class="paguro-btn paguro-btn-secondary paguro-group-action-link"
+                                                    <a class="paguro-btn paguro-btn-secondary paguro-group-action-link<?php echo $can_manage_weeks ? '' : ' is-disabled'; ?>"
+                                                       <?php if (!$can_manage_weeks) { ?>
+                                                           data-disabled="1" aria-disabled="true" tabindex="-1"
+                                                       <?php } ?>
                                                        <?php if (!empty($totals['weeks_count']) && $totals['weeks_count'] > 1) { ?>
                                                            data-confirm="<?php echo esc_attr($ui['group_week_confirm']); ?>"
                                                        <?php } ?>
@@ -338,7 +354,8 @@ function paguro_shortcode_summary_quote() {
                             $cancel_notice = isset($_GET['cancelled']) ? sanitize_text_field(wp_unslash($_GET['cancelled'])) : '';
                             $tz = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
                             $arrival_dt = new DateTime($b->date_start, $tz);
-                            $cancel_deadline_dt = (clone $arrival_dt)->modify('-15 days');
+                            $cancel_days = defined('PAGURO_CANCELLATION_DAYS') ? PAGURO_CANCELLATION_DAYS : 15;
+                            $cancel_deadline_dt = (clone $arrival_dt)->modify('-' . intval($cancel_days) . ' days');
                             $cancel_deadline_fmt = $cancel_deadline_dt->format('d/m/Y');
                             $created_at_fmt = '';
                             if (!empty($b->created_at)) {
@@ -385,7 +402,9 @@ function paguro_shortcode_summary_quote() {
                             <?php
                         else:
                             // QUOTE VIEW
-                            $total_cost = paguro_calculate_quote($b->apartment_id, $b->date_start, $b->date_end);
+                            $total_cost = function_exists('paguro_get_booking_total_cost')
+                                ? paguro_get_booking_total_cost($b)
+                                : paguro_calculate_quote($b->apartment_id, $b->date_start, $b->date_end);
                             $deposit_percent = intval(get_option('paguro_deposit_percent', 30)) / 100;
                             $deposit = ceil($total_cost * $deposit_percent);
                             $remaining = $total_cost - $deposit;
@@ -408,9 +427,9 @@ function paguro_shortcode_summary_quote() {
                                 'total_cost' => $total_cost,
                                 'deposit_cost' => $deposit,
                                 'remaining_cost' => $remaining,
-                                'total_cost_fmt' => number_format($total_cost, 2, ',', '.'),
-                                'deposit_cost_fmt' => number_format($deposit, 2, ',', '.'),
-                                'remaining_cost_fmt' => number_format($remaining, 2, ',', '.'),
+                                'total_cost_fmt' => number_format($total_cost, 0, ',', '.'),
+                                'deposit_cost_fmt' => number_format($deposit, 0, ',', '.'),
+                                'remaining_cost_fmt' => number_format($remaining, 0, ',', '.'),
                                 'deposit_percent' => $deposit_percent,
                                 'iban' => get_option('paguro_bank_iban'),
                                 'intestatario' => get_option('paguro_bank_owner'),
@@ -478,15 +497,15 @@ function paguro_shortcode_summary_quote() {
                                         <div class="paguro-pricing-table">
                                             <div class="pricing-row">
                                                 <span class="pricing-label"><?php echo esc_html($ui['label_total_cost']); ?></span>
-                                                <span class="pricing-value">€ <?php echo number_format($total_cost, 2, ',', '.'); ?></span>
+                                                <span class="pricing-value">€ <?php echo number_format($total_cost, 0, ',', '.'); ?></span>
                                             </div>
                                             <div class="pricing-row pricing-highlight">
                                                 <span class="pricing-label"><strong><?php echo esc_html(paguro_parse_template($ui['label_deposit'], $ph)); ?></strong></span>
-                                                <span class="pricing-value"><strong>€ <?php echo number_format($deposit, 2, ',', '.'); ?></strong></span>
+                                                <span class="pricing-value"><strong>€ <?php echo number_format($deposit, 0, ',', '.'); ?></strong></span>
                                             </div>
                                             <div class="pricing-row">
                                                 <span class="pricing-label"><?php echo esc_html($ui['label_remaining']); ?></span>
-                                                <span class="pricing-value">€ <?php echo number_format($remaining, 2, ',', '.'); ?></span>
+                                                <span class="pricing-value">€ <?php echo number_format($remaining, 0, ',', '.'); ?></span>
                                             </div>
                                         </div>
                                     </div>
@@ -513,7 +532,7 @@ function paguro_shortcode_summary_quote() {
                                                 </div>
                                                 <div class="bank-item">
                                                     <label><?php echo esc_html($ui['label_amount']); ?></label>
-                                                    <strong>€ <?php echo number_format($deposit, 2, ',', '.'); ?></strong>
+                                                    <strong>€ <?php echo number_format($deposit, 0, ',', '.'); ?></strong>
                                                 </div>
                                             </div>
                                             
@@ -646,6 +665,10 @@ function paguro_shortcode_summary_quote() {
     });
     document.querySelectorAll('.paguro-group-action-link').forEach(function (link) {
         link.addEventListener('click', function (ev) {
+            if (link.getAttribute('data-disabled') === '1') {
+                ev.preventDefault();
+                return;
+            }
             var msg = link.getAttribute('data-confirm');
             if (!msg) return;
             ev.preventDefault();

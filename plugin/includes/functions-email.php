@@ -11,13 +11,21 @@ if (!defined('ABSPATH')) exit;
 // =========================================================
 
 function paguro_build_email_html($content, $subject = 'Villa Celi', $is_admin = false) {
+    $privacy_txt = '';
     if (!$is_admin) {
         $privacy_txt = get_option('paguro_msg_ui_privacy_notice', '');
-        if (!empty($privacy_txt)) {
-            $content .= "\n\n" . $privacy_txt;
-        }
     }
-    $content = nl2br($content);
+
+    $has_html = (bool) preg_match('/<[^>]+>/', (string) $content);
+    if (!$has_html && !empty($privacy_txt)) {
+        $has_html = (bool) preg_match('/<[^>]+>/', (string) $privacy_txt);
+    }
+
+    if (!empty($privacy_txt)) {
+        $content .= $has_html ? '<br><br>' . $privacy_txt : "\n\n" . $privacy_txt;
+    }
+
+    $content = $has_html ? $content : nl2br(esc_html($content));
     
     $html = '<!DOCTYPE html>
 <html>
@@ -110,20 +118,34 @@ function paguro_get_email_placeholders($b) {
 
     $tz = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
     $arrival_dt = new DateTime($b->date_start, $tz);
-    $cancel_deadline_dt = (clone $arrival_dt)->modify('-15 days');
+    $cancel_days = defined('PAGURO_CANCELLATION_DAYS') ? PAGURO_CANCELLATION_DAYS : 15;
+    $cancel_deadline_dt = (clone $arrival_dt)->modify('-' . intval($cancel_days) . ' days');
     $cancel_deadline = $cancel_deadline_dt->format('d/m/Y');
     $cancel_deadline_raw = $cancel_deadline_dt->format('Y-m-d');
 
-    $total_cost = function_exists('paguro_calculate_quote')
-        ? paguro_calculate_quote($b->apartment_id, $b->date_start, $b->date_end)
-        : 0;
+    $total_cost = function_exists('paguro_get_booking_total_cost')
+        ? paguro_get_booking_total_cost($b)
+        : (function_exists('paguro_calculate_quote')
+            ? paguro_calculate_quote($b->apartment_id, $b->date_start, $b->date_end)
+            : 0);
+    $weeks_count = 0;
+    try {
+        $current = new DateTime($b->date_start, $tz);
+        $end_dt = new DateTime($b->date_end, $tz);
+        while ($current < $end_dt) {
+            $weeks_count++;
+            $current->modify('+1 week');
+        }
+    } catch (Exception $e) {
+        $weeks_count = 0;
+    }
     $deposit_percent = intval(get_option('paguro_deposit_percent', 30));
     $deposit = $total_cost > 0 ? ceil($total_cost * ($deposit_percent / 100)) : 0;
     $remaining = $total_cost - $deposit;
 
-    $total_cost_fmt = number_format($total_cost, 2, ',', '.');
-    $deposit_cost_fmt = number_format($deposit, 2, ',', '.');
-    $remaining_cost_fmt = number_format($remaining, 2, ',', '.');
+    $total_cost_fmt = number_format($total_cost, 0, ',', '.');
+    $deposit_cost_fmt = number_format($deposit, 0, ',', '.');
+    $remaining_cost_fmt = number_format($remaining, 0, ',', '.');
 
     $customer_iban = isset($b->customer_iban) ? $b->customer_iban : '';
     $customer_iban_norm = strtoupper(preg_replace('/\s+/', '', $customer_iban));
@@ -149,6 +171,8 @@ function paguro_get_email_placeholders($b) {
         'date_end_raw' => $b->date_end,
         'cancel_deadline' => $cancel_deadline,
         'cancel_deadline_raw' => $cancel_deadline_raw,
+        'weeks_count' => $weeks_count,
+        'count' => $weeks_count,
         // Costi (compat e raw)
         'total_cost' => $total_cost_fmt,
         'deposit_cost' => $deposit_cost_fmt,
@@ -194,7 +218,7 @@ function paguro_build_group_weeks_html($weeks) {
     $html = '<ul>';
     foreach ($weeks as $w) {
         $label = date('d/m/Y', strtotime($w['date_start'])) . ' - ' . date('d/m/Y', strtotime($w['date_end']));
-        $price = isset($w['price']) ? number_format($w['price'], 2, ',', '.') : '';
+        $price = isset($w['price']) ? number_format($w['price'], 0, ',', '.') : '';
         $html .= '<li>' . esc_html($label) . ($price !== '' ? ' (€' . esc_html($price) . ')' : '') . '</li>';
     }
     $html .= '</ul>';
@@ -230,6 +254,19 @@ function paguro_get_group_email_placeholders($group_id) {
 
     $date_start = $active[0]->date_start;
     $date_end = $active[count($active) - 1]->date_end;
+    $tz = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
+    $cancel_deadline = '';
+    $cancel_deadline_raw = '';
+    try {
+        $arrival_dt = new DateTime($date_start, $tz);
+        $cancel_days = defined('PAGURO_CANCELLATION_DAYS') ? PAGURO_CANCELLATION_DAYS : 15;
+        $cancel_deadline_dt = (clone $arrival_dt)->modify('-' . intval($cancel_days) . ' days');
+        $cancel_deadline = $cancel_deadline_dt->format('d/m/Y');
+        $cancel_deadline_raw = $cancel_deadline_dt->format('Y-m-d');
+    } catch (Exception $e) {
+        $cancel_deadline = '';
+        $cancel_deadline_raw = '';
+    }
 
     return [
         'guest_name' => $first->guest_name,
@@ -243,24 +280,27 @@ function paguro_get_group_email_placeholders($group_id) {
         'date_end_raw' => $date_end,
         'weeks_list' => $weeks_list,
         'weeks_count' => $totals['weeks_count'],
+        'count' => $totals['weeks_count'],
         'total_raw' => $totals['total_raw'],
-        'total_raw_fmt' => number_format($totals['total_raw'], 2, ',', '.'),
+        'total_raw_fmt' => number_format($totals['total_raw'], 0, ',', '.'),
         'discount_amount' => $totals['discount'],
-        'discount_amount_fmt' => number_format($totals['discount'], 2, ',', '.'),
+        'discount_amount_fmt' => number_format($totals['discount'], 0, ',', '.'),
         'total_cost_raw' => $totals['total_final'],
-        'total_cost' => number_format($totals['total_final'], 2, ',', '.'),
-        'total_cost_fmt' => number_format($totals['total_final'], 2, ',', '.'),
+        'total_cost' => number_format($totals['total_final'], 0, ',', '.'),
+        'total_cost_fmt' => number_format($totals['total_final'], 0, ',', '.'),
         'deposit_cost_raw' => $totals['deposit'],
-        'deposit_cost' => number_format($totals['deposit'], 2, ',', '.'),
-        'deposit_cost_fmt' => number_format($totals['deposit'], 2, ',', '.'),
+        'deposit_cost' => number_format($totals['deposit'], 0, ',', '.'),
+        'deposit_cost_fmt' => number_format($totals['deposit'], 0, ',', '.'),
         'remaining_cost_raw' => $totals['remaining'],
-        'remaining_cost' => number_format($totals['remaining'], 2, ',', '.'),
-        'remaining_cost_fmt' => number_format($totals['remaining'], 2, ',', '.'),
+        'remaining_cost' => number_format($totals['remaining'], 0, ',', '.'),
+        'remaining_cost_fmt' => number_format($totals['remaining'], 0, ',', '.'),
         'deposit_percent' => $deposit_percent,
         'iban' => get_option('paguro_bank_iban'),
         'intestatario' => get_option('paguro_bank_owner'),
         'link_riepilogo' => $link_riepilogo,
         'booking_url' => $booking_url,
+        'cancel_deadline' => $cancel_deadline,
+        'cancel_deadline_raw' => $cancel_deadline_raw,
         'admin_email' => get_option('admin_email')
     ];
 }
@@ -279,6 +319,37 @@ function paguro_get_admin_receipt_link($booking_id, $receipt_url = '') {
         ],
         admin_url('admin-post.php')
     );
+}
+
+function paguro_get_gdpr_notice_for_booking($b) {
+    if (!$b) return '';
+    $has_receipt = !empty($b->receipt_url);
+    $is_confirmed = false;
+    if (function_exists('paguro_get_history') && !empty($b->id)) {
+        $history = paguro_get_history($b->id);
+        foreach ($history as $entry) {
+            $action = $entry['action'] ?? '';
+            if ($action === 'ADMIN_CONFIRM' || $action === 'ADMIN_VALIDATE_RECEIPT') {
+                $is_confirmed = true;
+                break;
+            }
+        }
+    }
+    $days = defined('PAGURO_CANCELLATION_DAYS') ? PAGURO_CANCELLATION_DAYS : 15;
+
+    if (!$has_receipt) {
+        return '<div class="warning-box">Attenzione: la cancellazione dei dati equivale alla cancellazione del preventivo. Vuoi procedere? (S/N)</div>';
+    }
+    if ($is_confirmed) {
+        return '<div class="info-box">Richiesta presa in carico. I dati verranno cancellati ' . intval($days) . ' giorni dopo il check-out e riceverai conferma.</div>';
+    }
+    return '<div class="warning-box">Attenzione: è presente una prenotazione. Per cancellare i dati, cancella prima la prenotazione.</div>';
+}
+
+function paguro_append_gdpr_notice($body, $b) {
+    $notice = paguro_get_gdpr_notice_for_booking($b);
+    if ($notice === '') return $body;
+    return $body . '<br><br>' . $notice;
 }
 
 // =========================================================
@@ -824,6 +895,7 @@ function paguro_send_cancellation_to_user($booking_id) {
             'Se applicabile, l\'acconto sarà rimborsato secondo le nostre condizioni.';
     }
     $body = paguro_parse_template($body_tpl, $placeholders);
+    $body = paguro_append_gdpr_notice($body, $b);
     
     return paguro_send_email($b->guest_email, $subject, $body, false);
 }
@@ -867,6 +939,7 @@ function paguro_send_refund_sent_to_user($booking_id) {
             'Grazie per averci contattato.';
     }
     $body = paguro_parse_template($body_tpl, $placeholders);
+    $body = paguro_append_gdpr_notice($body, $b);
 
     return paguro_send_email($b->guest_email, $subject, $body, false);
 }

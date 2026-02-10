@@ -106,6 +106,8 @@ if (isset($_POST['paguro_save_web_templates']) && check_admin_referer('paguro_we
     update_option('paguro_msg_ui_section_upload', sanitize_text_field(wp_unslash($_POST['ui_section_upload'] ?? '')));
     update_option('paguro_msg_ui_section_uploaded', sanitize_text_field(wp_unslash($_POST['ui_section_uploaded'] ?? '')));
     update_option('paguro_msg_ui_section_actions', sanitize_text_field(wp_unslash($_POST['ui_section_actions'] ?? '')));
+    update_option('paguro_msg_ui_group_actions_ready', sanitize_text_field(wp_unslash($_POST['ui_group_actions_ready'] ?? '')));
+    update_option('paguro_msg_ui_group_actions_locked', sanitize_textarea_field(wp_unslash($_POST['ui_group_actions_locked'] ?? '')));
     update_option('paguro_msg_ui_label_guest', sanitize_text_field(wp_unslash($_POST['ui_label_guest'] ?? '')));
     update_option('paguro_msg_ui_label_name', sanitize_text_field(wp_unslash($_POST['ui_label_name'] ?? '')));
     update_option('paguro_msg_ui_label_email', sanitize_text_field(wp_unslash($_POST['ui_label_email'] ?? '')));
@@ -283,6 +285,7 @@ if (isset($_POST['paguro_action']) && check_admin_referer('paguro_admin_action')
             $label = 'email';
             $status = intval($booking->status);
             $has_receipt = !empty($booking->receipt_url);
+            $failure_reason = '';
 
             $history = paguro_get_history($req_id);
             $is_confirmed = false;
@@ -324,7 +327,84 @@ if (isset($_POST['paguro_action']) && check_admin_referer('paguro_admin_action')
                 paguro_add_history($req_id, 'ADMIN_RESEND_EMAIL', 'Email reinviata da amministratore (' . $label . ')');
                 echo '<div class="notice notice-success is-dismissible"><p><strong>✓</strong> Email Reinviata (' . esc_html($label) . ').</p></div>';
             } else {
-                echo '<div class="notice notice-error"><p>Impossibile reinviare la mail per questo stato.</p></div>';
+                if (!empty($booking->group_id) && function_exists('paguro_get_group_bookings')) {
+                    $group_bookings = paguro_get_group_bookings($booking->group_id);
+                    if ($status === 1 && $group_bookings) {
+                        $confirmed = 0;
+                        foreach ($group_bookings as $gb) {
+                            if (intval($gb->status) === 1) $confirmed++;
+                        }
+                        if ($confirmed < count($group_bookings)) {
+                            $failure_reason = 'Prenotazione multi‑settimana non completamente confermata (' . $confirmed . '/' . count($group_bookings) . ').';
+                        }
+                    }
+                    if ($failure_reason === '' && function_exists('paguro_get_group_email_placeholders')) {
+                        $ph = paguro_get_group_email_placeholders($booking->group_id);
+                        $group_email = $ph['guest_email'] ?? '';
+                        if ($ph === [] || !is_email($group_email)) {
+                            $failure_reason = 'Email del gruppo mancante o non valida.';
+                        }
+                    }
+                }
+                if ($failure_reason === '' && !is_email($booking->guest_email)) {
+                    $failure_reason = 'Email del guest mancante o non valida.';
+                }
+                if ($failure_reason === '') {
+                    $failure_reason = 'Invio fallito (wp_mail). Verifica configurazione mail o log server.';
+                }
+                paguro_add_history($req_id, 'ADMIN_RESEND_EMAIL_FAIL', 'Reinvio fallito: ' . $failure_reason);
+                echo '<div class="notice notice-error"><p>Impossibile reinviare la mail per questo stato. ' . esc_html($failure_reason) . '</p></div>';
+            }
+        }
+
+        if ($_POST['paguro_action'] === 'validate_group_receipt') {
+            $group_id = sanitize_text_field(wp_unslash($_POST['group_id'] ?? ''));
+            if ($group_id === '' || !function_exists('paguro_get_group_bookings')) {
+                echo '<div class="notice notice-error"><p>Gruppo non valido.</p></div>';
+            } else {
+                $group_bookings = paguro_get_group_bookings($group_id);
+                if (!$group_bookings) {
+                    echo '<div class="notice notice-error"><p>Gruppo non trovato.</p></div>';
+                } else {
+                    $updated = 0;
+                    foreach ($group_bookings as $gb) {
+                        if (intval($gb->status) === 2 && !empty($gb->receipt_url)) {
+                            $wpdb->update($table_avail, ['status' => 1], ['id' => $gb->id]);
+
+                            $losers = $wpdb->get_results($wpdb->prepare(
+                                "SELECT id FROM $table_avail WHERE apartment_id=%d AND id!=%d AND status=2 AND (date_start<%s AND date_end>%s)",
+                                $gb->apartment_id, $gb->id, $gb->date_end, $gb->date_start
+                            ));
+                            foreach ($losers as $l) {
+                                $wpdb->delete($table_avail, ['id' => $l->id]);
+                            }
+
+                            paguro_add_history($gb->id, 'ADMIN_VALIDATE_RECEIPT', 'Distinta validata da amministratore (gruppo)');
+                            $updated++;
+                        }
+                    }
+
+                    $group_bookings = paguro_get_group_bookings($group_id);
+                    $all_confirmed = true;
+                    foreach ($group_bookings as $gb) {
+                        if (intval($gb->status) === 3) {
+                            continue;
+                        }
+                        if (intval($gb->status) !== 1) {
+                            $all_confirmed = false;
+                            break;
+                        }
+                    }
+                    if ($all_confirmed && function_exists('paguro_send_group_booking_confirmed_to_user')) {
+                        paguro_send_group_booking_confirmed_to_user($group_id);
+                    }
+
+                    if ($updated > 0) {
+                        echo '<div class="notice notice-success is-dismissible"><p><strong>✓</strong> Distinta validata per il gruppo.</p></div>';
+                    } else {
+                        echo '<div class="notice notice-error"><p>Nessuna distinta valida da confermare per il gruppo.</p></div>';
+                    }
+                }
             }
         }
 
@@ -381,6 +461,8 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
     $guest_email = sanitize_email(wp_unslash($_POST['guest_email'] ?? ''));
     $guest_phone = sanitize_text_field(wp_unslash($_POST['guest_phone'] ?? ''));
     $guest_notes = sanitize_textarea_field(wp_unslash($_POST['guest_notes'] ?? ''));
+    $manual_price = floatval(wp_unslash($_POST['manual_price'] ?? 0));
+    if ($manual_price < 0) $manual_price = 0;
 
     if ($start >= $end) {
         echo '<div class="notice notice-error"><p>Errore: La data di arrivo deve essere precedente alla partenza.</p></div>';
@@ -395,7 +477,11 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
             echo '<div class="notice notice-error"><p>Errore: Le date si sovrappongono a una prenotazione già confermata.</p></div>';
         } else {
             $token = bin2hex(random_bytes(16));
-            $hist = json_encode([['time' => current_time('mysql'), 'action' => 'ADMIN_MANUAL_INSERT', 'details' => 'Inserimento manuale da pannello']]);
+            $details = 'Inserimento manuale da pannello';
+            if ($manual_price > 0) {
+                $details .= ' (Prezzo: €' . number_format($manual_price, 0, ',', '.') . ')';
+            }
+            $hist = json_encode([['time' => current_time('mysql'), 'action' => 'ADMIN_MANUAL_INSERT', 'details' => $details]]);
 
             $wpdb->insert($table_avail, [
                 'apartment_id' => $apt_id,
@@ -405,6 +491,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                 'guest_email' => $guest_email,
                 'guest_phone' => $guest_phone,
                 'guest_notes' => $guest_notes,
+                'manual_price' => $manual_price > 0 ? $manual_price : null,
                 'status' => 1, // Confermato direttamente
                 'lock_token' => $token,
                 'history_log' => $hist,
@@ -647,15 +734,53 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
             margin-top: 10px;
         }
         .paguro-group-base {
-            background-color: #eef3ff !important;
+            background-color: transparent;
         }
         .paguro-group-alt {
-            background-color: #e3ecff !important;
+            background-color: transparent;
         }
         .paguro-group-base td:first-child,
         .paguro-group-alt td:first-child {
             border-left: 3px solid #6f8fd6;
         }
+
+        .paguro-row-status-no-receipt { background-color: #fdecec; }
+        .paguro-row-status-receipt { background-color: #e7f6ea; }
+        .paguro-row-status-confirmed { background-color: #e3f2e8; }
+        .paguro-row-status-cancelled { background-color: #f8d7da; }
+        .paguro-row-status-waitlist { background-color: #e8f1ff; }
+        .paguro-row-status-cancel-request { background-color: #fff3cd; }
+
+        .paguro-group-base.paguro-row-status-no-receipt { background-color: #fbe2e2; }
+        .paguro-group-alt.paguro-row-status-no-receipt { background-color: #f8d6d6; }
+        .paguro-group-base.paguro-row-status-receipt { background-color: #def1e3; }
+        .paguro-group-alt.paguro-row-status-receipt { background-color: #d4ead9; }
+        .paguro-group-base.paguro-row-status-confirmed { background-color: #dff0e6; }
+        .paguro-group-alt.paguro-row-status-confirmed { background-color: #d4eadf; }
+        .paguro-group-base.paguro-row-status-cancelled { background-color: #f4cfd4; }
+        .paguro-group-alt.paguro-row-status-cancelled { background-color: #f0c2c9; }
+
+        .paguro-group-row td,
+        .paguro-group-child td {
+            transition: background-color 0.2s ease;
+        }
+
+        .paguro-status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+        .paguro-status-dot--confirmed { background-color: #28a745; }
+        .paguro-status-dot--receipt { background-color: #28a745; }
+        .paguro-status-dot--no-receipt { background-color: #dc3545; }
+        .paguro-status-dot--cancelled { background-color: #dc3545; }
+        .paguro-status-dot--waitlist { background-color: #007bff; }
+        .paguro-status-dot--cancel-request { background-color: #ffc107; }
+        .paguro-status-dot--partial { background-color: #fd7e14; }
+        .paguro-status-dot--quote { background-color: #6c757d; }
     </style>
 
     <nav class="nav-tab-wrapper">
@@ -691,7 +816,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                     <option value="">-- Seleziona --</option>
                                     <?php $apts = $wpdb->get_results("SELECT * FROM $table_apt ORDER BY name");
                                     foreach ($apts as $apt) {
-                                        echo '<option value="' . $apt->id . '">' . esc_html($apt->name) . ' (€' . number_format($apt->base_price, 2) . '/settimana)</option>';
+                                        echo '<option value="' . $apt->id . '">' . esc_html($apt->name) . ' (€' . number_format($apt->base_price, 0, ',', '.') . '/settimana)</option>';
                                     } ?>
                                 </select>
                             </td>
@@ -703,6 +828,13 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                         <tr>
                             <th>Partenza</th>
                             <td><input type="date" name="date_end" required></td>
+                        </tr>
+                        <tr>
+                            <th>Prezzo Totale (opzionale)</th>
+                            <td>
+                                <input type="number" name="manual_price" step="0.01" min="0" placeholder="Prezzo €">
+                                <p class="description">Se vuoto, usa il calcolo automatico.</p>
+                            </td>
                         </tr>
                         <tr>
                             <th>Nome Guest</th>
@@ -808,6 +940,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                 $all_cancelled = true;
                                 $any_confirmed = false;
                                 $any_receipt = false;
+                                $any_pending_receipt = false;
                                 $receipt_link = '';
                                 foreach ($children as $cb) {
                                     if ($cb->status != 1) $all_confirmed = false;
@@ -817,19 +950,24 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                         $receipt_link = paguro_get_admin_receipt_link($cb->id, $cb->receipt_url);
                                         $any_receipt = true;
                                     }
+                                    if (intval($cb->status) === 2 && !empty($cb->receipt_url)) {
+                                        $any_pending_receipt = true;
+                                    }
                                 }
                                 $group_status = $all_cancelled ? 'Cancellata' : ($all_confirmed ? 'Confermata' : ($any_confirmed ? 'Parziale' : 'Preventivo'));
                                 $group_status_class = $all_confirmed ? 'paguro-badge--green' : ($all_cancelled ? 'paguro-badge--red' : ($any_confirmed ? 'paguro-badge--orange' : 'paguro-badge--gray'));
+                                $group_row_status_class = $all_cancelled ? 'paguro-row-status-cancelled' : ($all_confirmed ? 'paguro-row-status-confirmed' : ($any_receipt ? 'paguro-row-status-receipt' : 'paguro-row-status-no-receipt'));
+                                $group_dot_class = $all_cancelled ? 'paguro-status-dot--cancelled' : ($all_confirmed ? 'paguro-status-dot--confirmed' : ($any_confirmed ? 'paguro-status-dot--partial' : 'paguro-status-dot--quote'));
                                 $group_id_short = substr($b->group_id, 0, 8);
                                 $group_link = site_url("/" . get_option('paguro_page_slug', 'riepilogo-prenotazione') . "/?token={$b->group_id}");
                                 ?>
-                                <tr class="paguro-group-row <?php echo esc_attr($group_class); ?>" data-group="<?php echo esc_attr($b->group_id); ?>">
+                                <tr class="paguro-group-row <?php echo esc_attr($group_class . ' ' . $group_row_status_class); ?>" data-group="<?php echo esc_attr($b->group_id); ?>">
                                     <td><strong>GRP-<?php echo esc_html($group_id_short); ?></strong></td>
                                     <td><?php echo esc_html($first->guest_name); ?><br><small><?php echo esc_html($first->guest_email); ?></small></td>
                                     <td><?php echo esc_html($apt->name ?? 'N/A'); ?></td>
                                     <td><?php echo date('d/m/Y', strtotime($children[0]->date_start)); ?></td>
                                     <td><?php echo date('d/m/Y', strtotime($last->date_end)); ?></td>
-                                    <td><span class="paguro-badge <?php echo esc_attr($group_status_class); ?>"><?php echo esc_html($group_status); ?></span></td>
+                                    <td><span class="paguro-badge <?php echo esc_attr($group_status_class); ?>"><span class="paguro-status-dot <?php echo esc_attr($group_dot_class); ?>" aria-hidden="true"></span><?php echo esc_html($group_status); ?></span></td>
                                     <td>
                                         <?php if ($any_receipt) { ?>
                                             <a href="#" data-receipt-url="<?php echo esc_url($receipt_link); ?>" class="button button-small paguro-admin-receipt-link" onclick="return paguroAdminShowReceipt(this);">Vedi</a>
@@ -840,6 +978,14 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                     <td><span style="color:#999;">—</span></td>
                                     <td>
                                         <a href="<?php echo esc_url($group_link); ?>" class="button button-small">Riepilogo</a>
+                                        <?php if ($any_pending_receipt) { ?>
+                                            <form method="POST" style="display:inline;">
+                                                <?php wp_nonce_field('paguro_admin_action'); ?>
+                                                <input type="hidden" name="booking_id" value="<?php echo esc_attr($first->id); ?>">
+                                                <input type="hidden" name="group_id" value="<?php echo esc_attr($b->group_id); ?>">
+                                                <button type="submit" name="paguro_action" value="validate_group_receipt" class="button button-small paguro-admin-confirm" data-confirm="Validare tutte le distinte del gruppo?">Valida Distinta</button>
+                                            </form>
+                                        <?php } ?>
                                         <button type="button" class="button button-small paguro-group-toggle" data-group="<?php echo esc_attr($b->group_id); ?>">Dettagli</button>
                                     </td>
                                 </tr>
@@ -862,6 +1008,24 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                     ];
                                     $status_label = $status_labels[$cb->status] ?? 'Sconosciuto';
                                     $status_class = $status_classes[$cb->status] ?? 'paguro-badge--gray';
+                                    $row_status_class = 'paguro-row-status-no-receipt';
+                                    $dot_class = 'paguro-status-dot--no-receipt';
+                                    if (intval($cb->status) === 1) {
+                                        $row_status_class = 'paguro-row-status-confirmed';
+                                        $dot_class = 'paguro-status-dot--confirmed';
+                                    } elseif (intval($cb->status) === 3) {
+                                        $row_status_class = 'paguro-row-status-cancelled';
+                                        $dot_class = 'paguro-status-dot--cancelled';
+                                    } elseif (intval($cb->status) === 4) {
+                                        $row_status_class = 'paguro-row-status-waitlist';
+                                        $dot_class = 'paguro-status-dot--waitlist';
+                                    } elseif (intval($cb->status) === 5) {
+                                        $row_status_class = 'paguro-row-status-cancel-request';
+                                        $dot_class = 'paguro-status-dot--cancel-request';
+                                    } elseif (intval($cb->status) === 2) {
+                                        $row_status_class = !empty($cb->receipt_url) ? 'paguro-row-status-receipt' : 'paguro-row-status-no-receipt';
+                                        $dot_class = !empty($cb->receipt_url) ? 'paguro-status-dot--receipt' : 'paguro-status-dot--no-receipt';
+                                    }
                                     $status_action = '';
                                     $status_confirm = '';
                                     if ($cb->status == 2 && !empty($cb->receipt_url)) {
@@ -874,12 +1038,12 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                         $status_confirm = 'Confermare la cancellazione?';
                                     }
                                     if ($status_action) {
-                                        $status_label = '<button type="submit" name="paguro_action" value="' . esc_attr($status_action) . '" class="button button-small paguro-admin-confirm" data-confirm="' . esc_attr($status_confirm) . '">' . esc_html($status_label) . '</button>';
+                                        $status_label = '<button type="submit" name="paguro_action" value="' . esc_attr($status_action) . '" class="button button-small paguro-admin-confirm" data-confirm="' . esc_attr($status_confirm) . '"><span class="paguro-status-dot ' . esc_attr($dot_class) . '" aria-hidden="true"></span>' . esc_html($status_label) . '</button>';
                                     } else {
-                                        $status_label = '<span class="paguro-badge ' . esc_attr($status_class) . '">' . esc_html($status_label) . '</span>';
+                                        $status_label = '<span class="paguro-badge ' . esc_attr($status_class) . '"><span class="paguro-status-dot ' . esc_attr($dot_class) . '" aria-hidden="true"></span>' . esc_html($status_label) . '</span>';
                                     }
                                     ?>
-                                    <tr class="paguro-group-child <?php echo esc_attr($group_class); ?>" data-group="<?php echo esc_attr($b->group_id); ?>" style="display:none;">
+                                    <tr class="paguro-group-child <?php echo esc_attr($group_class . ' ' . $row_status_class); ?>" data-group="<?php echo esc_attr($b->group_id); ?>" style="display:none;">
                                         <td>&nbsp;&nbsp;↳ <?php echo $cb->id; ?></td>
                                         <td><?php echo esc_html($cb->guest_name); ?><br><small><?php echo esc_html($cb->guest_email); ?></small></td>
                                         <td><?php echo esc_html($apt_child->name ?? 'N/A'); ?></td>
@@ -938,6 +1102,24 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                             ];
                             $status_label = $status_labels[$b->status] ?? 'Sconosciuto';
                             $status_class = $status_classes[$b->status] ?? 'paguro-badge--gray';
+                            $row_status_class = 'paguro-row-status-no-receipt';
+                            $dot_class = 'paguro-status-dot--no-receipt';
+                            if (intval($b->status) === 1) {
+                                $row_status_class = 'paguro-row-status-confirmed';
+                                $dot_class = 'paguro-status-dot--confirmed';
+                            } elseif (intval($b->status) === 3) {
+                                $row_status_class = 'paguro-row-status-cancelled';
+                                $dot_class = 'paguro-status-dot--cancelled';
+                            } elseif (intval($b->status) === 4) {
+                                $row_status_class = 'paguro-row-status-waitlist';
+                                $dot_class = 'paguro-status-dot--waitlist';
+                            } elseif (intval($b->status) === 5) {
+                                $row_status_class = 'paguro-row-status-cancel-request';
+                                $dot_class = 'paguro-status-dot--cancel-request';
+                            } elseif (intval($b->status) === 2) {
+                                $row_status_class = !empty($b->receipt_url) ? 'paguro-row-status-receipt' : 'paguro-row-status-no-receipt';
+                                $dot_class = !empty($b->receipt_url) ? 'paguro-status-dot--receipt' : 'paguro-status-dot--no-receipt';
+                            }
                             $status_action = '';
                             $status_confirm = '';
                             if ($b->status == 2 && !empty($b->receipt_url)) {
@@ -950,12 +1132,12 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                 $status_confirm = 'Confermare la cancellazione?';
                             }
                             if ($status_action) {
-                                $status_label = '<button type="submit" name="paguro_action" value="' . esc_attr($status_action) . '" class="button button-small paguro-admin-confirm" data-confirm="' . esc_attr($status_confirm) . '">' . esc_html($status_label) . '</button>';
+                                $status_label = '<button type="submit" name="paguro_action" value="' . esc_attr($status_action) . '" class="button button-small paguro-admin-confirm" data-confirm="' . esc_attr($status_confirm) . '"><span class="paguro-status-dot ' . esc_attr($dot_class) . '" aria-hidden="true"></span>' . esc_html($status_label) . '</button>';
                             } else {
-                                $status_label = '<span class="paguro-badge ' . esc_attr($status_class) . '">' . esc_html($status_label) . '</span>';
+                                $status_label = '<span class="paguro-badge ' . esc_attr($status_class) . '"><span class="paguro-status-dot ' . esc_attr($dot_class) . '" aria-hidden="true"></span>' . esc_html($status_label) . '</span>';
                             }
                             ?>
-                            <tr>
+                            <tr class="<?php echo esc_attr($row_status_class); ?>">
                                 <td><?php echo $b->id; ?></td>
                                 <td><?php echo esc_html($b->guest_name); ?><br><small><?php echo esc_html($b->guest_email); ?></small></td>
                                 <td><?php echo esc_html($apt->name ?? 'N/A'); ?></td>
@@ -1020,6 +1202,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                 }
             }
             $finance_rendered_groups = [];
+            $finance_group_index = 0;
             $deposit_percent = intval(get_option('paguro_deposit_percent', 30));
             $sum_deposit_received = 0;
             $sum_remaining = 0;
@@ -1078,6 +1261,8 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                     continue;
                                 }
                                 $finance_rendered_groups[$b->group_id] = true;
+                                $finance_group_index++;
+                                $group_class = ($finance_group_index % 2 === 0) ? 'paguro-group-alt' : 'paguro-group-base';
                                 $children = $finance_grouped[$b->group_id];
                                 $first = $children[0];
                                 $last = $children[count($children) - 1];
@@ -1095,6 +1280,8 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                 }
                                 $group_status = $all_cancelled ? 'Cancellata' : ($all_confirmed ? 'Confermata' : ($any_confirmed ? 'Parziale' : 'Preventivo'));
                                 $group_status_class = $all_confirmed ? 'paguro-badge--green' : ($all_cancelled ? 'paguro-badge--red' : ($any_confirmed ? 'paguro-badge--orange' : 'paguro-badge--gray'));
+                                $group_row_status_class = $all_cancelled ? 'paguro-row-status-cancelled' : ($all_confirmed ? 'paguro-row-status-confirmed' : ($any_receipt ? 'paguro-row-status-receipt' : 'paguro-row-status-no-receipt'));
+                                $group_dot_class = $all_cancelled ? 'paguro-status-dot--cancelled' : ($all_confirmed ? 'paguro-status-dot--confirmed' : ($any_confirmed ? 'paguro-status-dot--partial' : 'paguro-status-dot--quote'));
 
                                 $totals = function_exists('paguro_calculate_group_totals') ? paguro_calculate_group_totals($b->group_id, $children) : [
                                     'weeks_count' => 0,
@@ -1124,8 +1311,8 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                             break;
                                         }
                                     }
-                                    if ($refund_sent && function_exists('paguro_calculate_quote')) {
-                                        $week_total = paguro_calculate_quote($cb->apartment_id, $cb->date_start, $cb->date_end);
+                                    if ($refund_sent && function_exists('paguro_get_booking_total_cost')) {
+                                        $week_total = paguro_get_booking_total_cost($cb);
                                         $refund_amount += ceil($week_total * ($deposit_percent / 100));
                                     }
                                 }
@@ -1139,7 +1326,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
 
                                 $group_id_short = substr($b->group_id, 0, 8);
                                 ?>
-                                <tr class="paguro-finance-group-row" data-group="<?php echo esc_attr($b->group_id); ?>">
+                                <tr class="paguro-finance-group-row <?php echo esc_attr($group_class . ' ' . $group_row_status_class); ?>" data-group="<?php echo esc_attr($b->group_id); ?>">
                                     <td>
                                         <strong>GRP-<?php echo esc_html($group_id_short); ?></strong><br>
                                         <button type="button" class="button button-small paguro-finance-toggle" data-group="<?php echo esc_attr($b->group_id); ?>">Dettagli</button>
@@ -1148,13 +1335,13 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                     <td><?php echo esc_html($apt_name); ?></td>
                                     <td><?php echo date('d/m/Y', strtotime($children[0]->date_start)); ?></td>
                                     <td><?php echo date('d/m/Y', strtotime($last->date_end)); ?></td>
-                                    <td><span class="paguro-badge <?php echo esc_attr($group_status_class); ?>"><?php echo esc_html($group_status); ?></span></td>
-                                    <td>€ <?php echo number_format($total_final, 2, ',', '.'); ?></td>
-                                    <td>€ <?php echo number_format($deposit, 2, ',', '.'); ?></td>
-                                    <td><?php echo $deposit_received > 0 ? ('€ ' . number_format($deposit_received, 2, ',', '.')) : '—'; ?></td>
-                                    <td><?php echo $remaining_expected > 0 ? ('€ ' . number_format($remaining_expected, 2, ',', '.')) : '—'; ?></td>
-                                    <td><?php echo $forecast > 0 ? ('€ ' . number_format($forecast, 2, ',', '.')) : '—'; ?></td>
-                                    <td><?php echo $refund_amount > 0 ? ('€ ' . number_format($refund_amount, 2, ',', '.')) : '—'; ?></td>
+                                    <td><span class="paguro-badge <?php echo esc_attr($group_status_class); ?>"><span class="paguro-status-dot <?php echo esc_attr($group_dot_class); ?>" aria-hidden="true"></span><?php echo esc_html($group_status); ?></span></td>
+                                    <td>€ <?php echo number_format($total_final, 0, ',', '.'); ?></td>
+                                    <td>€ <?php echo number_format($deposit, 0, ',', '.'); ?></td>
+                                    <td><?php echo $deposit_received > 0 ? ('€ ' . number_format($deposit_received, 0, ',', '.')) : '—'; ?></td>
+                                    <td><?php echo $remaining_expected > 0 ? ('€ ' . number_format($remaining_expected, 0, ',', '.')) : '—'; ?></td>
+                                    <td><?php echo $forecast > 0 ? ('€ ' . number_format($forecast, 0, ',', '.')) : '—'; ?></td>
+                                    <td><?php echo $refund_amount > 0 ? ('€ ' . number_format($refund_amount, 0, ',', '.')) : '—'; ?></td>
                                 </tr>
                                 <?php
                                 foreach ($children as $cb) {
@@ -1175,8 +1362,26 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                     ];
                                     $status_label = $status_labels[$cb->status] ?? 'Sconosciuto';
                                     $status_class = $status_classes[$cb->status] ?? 'paguro-badge--gray';
+                                    $row_status_class = 'paguro-row-status-no-receipt';
+                                    $dot_class = 'paguro-status-dot--no-receipt';
+                                    if (intval($cb->status) === 1) {
+                                        $row_status_class = 'paguro-row-status-confirmed';
+                                        $dot_class = 'paguro-status-dot--confirmed';
+                                    } elseif (intval($cb->status) === 3) {
+                                        $row_status_class = 'paguro-row-status-cancelled';
+                                        $dot_class = 'paguro-status-dot--cancelled';
+                                    } elseif (intval($cb->status) === 4) {
+                                        $row_status_class = 'paguro-row-status-waitlist';
+                                        $dot_class = 'paguro-status-dot--waitlist';
+                                    } elseif (intval($cb->status) === 5) {
+                                        $row_status_class = 'paguro-row-status-cancel-request';
+                                        $dot_class = 'paguro-status-dot--cancel-request';
+                                    } elseif (intval($cb->status) === 2) {
+                                        $row_status_class = !empty($cb->receipt_url) ? 'paguro-row-status-receipt' : 'paguro-row-status-no-receipt';
+                                        $dot_class = !empty($cb->receipt_url) ? 'paguro-status-dot--receipt' : 'paguro-status-dot--no-receipt';
+                                    }
 
-                                    $total_cost = function_exists('paguro_calculate_quote') ? paguro_calculate_quote($cb->apartment_id, $cb->date_start, $cb->date_end) : 0;
+                                    $total_cost = function_exists('paguro_get_booking_total_cost') ? paguro_get_booking_total_cost($cb) : 0;
                                     $deposit_cb = ceil($total_cost * ($deposit_percent / 100));
                                     $remaining_cb = $total_cost - $deposit_cb;
                                     $deposit_received_cb = ($cb->status == 1 || !empty($cb->receipt_url)) ? $deposit_cb : 0;
@@ -1195,19 +1400,19 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                         }
                                     }
                                     ?>
-                                    <tr class="paguro-finance-child" data-group="<?php echo esc_attr($b->group_id); ?>" style="display:none;">
+                                    <tr class="paguro-finance-child <?php echo esc_attr($group_class . ' ' . $row_status_class); ?>" data-group="<?php echo esc_attr($b->group_id); ?>" style="display:none;">
                                         <td>&nbsp;&nbsp;↳ <?php echo $cb->id; ?></td>
                                         <td><?php echo esc_html($cb->guest_name); ?><br><small><?php echo esc_html($cb->guest_email); ?></small></td>
                                         <td><?php echo esc_html($apt_child); ?></td>
                                         <td><?php echo date('d/m/Y', strtotime($cb->date_start)); ?></td>
                                         <td><?php echo date('d/m/Y', strtotime($cb->date_end)); ?></td>
-                                        <td><span class="paguro-badge <?php echo esc_attr($status_class); ?>"><?php echo esc_html($status_label); ?></span></td>
-                                        <td>€ <?php echo number_format($total_cost, 2, ',', '.'); ?></td>
-                                        <td>€ <?php echo number_format($deposit_cb, 2, ',', '.'); ?></td>
-                                        <td><?php echo $deposit_received_cb > 0 ? ('€ ' . number_format($deposit_received_cb, 2, ',', '.')) : '—'; ?></td>
-                                        <td><?php echo $remaining_cb > 0 ? ('€ ' . number_format($remaining_cb, 2, ',', '.')) : '—'; ?></td>
-                                        <td><?php echo $forecast_cb > 0 ? ('€ ' . number_format($forecast_cb, 2, ',', '.')) : '—'; ?></td>
-                                        <td><?php echo $refund_cb > 0 ? ('€ ' . number_format($refund_cb, 2, ',', '.')) : '—'; ?></td>
+                                        <td><span class="paguro-badge <?php echo esc_attr($status_class); ?>"><span class="paguro-status-dot <?php echo esc_attr($dot_class); ?>" aria-hidden="true"></span><?php echo esc_html($status_label); ?></span></td>
+                                        <td>€ <?php echo number_format($total_cost, 0, ',', '.'); ?></td>
+                                        <td>€ <?php echo number_format($deposit_cb, 0, ',', '.'); ?></td>
+                                        <td><?php echo $deposit_received_cb > 0 ? ('€ ' . number_format($deposit_received_cb, 0, ',', '.')) : '—'; ?></td>
+                                        <td><?php echo $remaining_cb > 0 ? ('€ ' . number_format($remaining_cb, 0, ',', '.')) : '—'; ?></td>
+                                        <td><?php echo $forecast_cb > 0 ? ('€ ' . number_format($forecast_cb, 0, ',', '.')) : '—'; ?></td>
+                                        <td><?php echo $refund_cb > 0 ? ('€ ' . number_format($refund_cb, 0, ',', '.')) : '—'; ?></td>
                                     </tr>
                                     <?php
                                 }
@@ -1232,7 +1437,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                             $status_label = $status_labels[$b->status] ?? 'Sconosciuto';
                             $status_class = $status_classes[$b->status] ?? 'paguro-badge--gray';
 
-                            $total_cost = function_exists('paguro_calculate_quote') ? paguro_calculate_quote($b->apartment_id, $b->date_start, $b->date_end) : 0;
+                            $total_cost = function_exists('paguro_get_booking_total_cost') ? paguro_get_booking_total_cost($b) : 0;
                             $deposit = ceil($total_cost * ($deposit_percent / 100));
                             $remaining = $total_cost - $deposit;
                             $deposit_received = ($b->status == 1 || !empty($b->receipt_url)) ? $deposit : 0;
@@ -1267,12 +1472,12 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                                 <td><?php echo date('d/m/Y', strtotime($b->date_start)); ?></td>
                                 <td><?php echo date('d/m/Y', strtotime($b->date_end)); ?></td>
                                 <td><span class="paguro-badge <?php echo esc_attr($status_class); ?>"><?php echo esc_html($status_label); ?></span></td>
-                                <td>€ <?php echo number_format($total_cost, 2, ',', '.'); ?></td>
-                                <td>€ <?php echo number_format($deposit, 2, ',', '.'); ?></td>
-                                <td><?php echo $deposit_received > 0 ? ('€ ' . number_format($deposit_received, 2, ',', '.')) : '—'; ?></td>
-                                <td><?php echo $remaining_expected > 0 ? ('€ ' . number_format($remaining_expected, 2, ',', '.')) : '—'; ?></td>
-                                <td><?php echo $forecast > 0 ? ('€ ' . number_format($forecast, 2, ',', '.')) : '—'; ?></td>
-                                <td><?php echo $refund_amount > 0 ? ('€ ' . number_format($refund_amount, 2, ',', '.')) : '—'; ?></td>
+                                <td>€ <?php echo number_format($total_cost, 0, ',', '.'); ?></td>
+                                <td>€ <?php echo number_format($deposit, 0, ',', '.'); ?></td>
+                                <td><?php echo $deposit_received > 0 ? ('€ ' . number_format($deposit_received, 0, ',', '.')) : '—'; ?></td>
+                                <td><?php echo $remaining_expected > 0 ? ('€ ' . number_format($remaining_expected, 0, ',', '.')) : '—'; ?></td>
+                                <td><?php echo $forecast > 0 ? ('€ ' . number_format($forecast, 0, ',', '.')) : '—'; ?></td>
+                                <td><?php echo $refund_amount > 0 ? ('€ ' . number_format($refund_amount, 0, ',', '.')) : '—'; ?></td>
                             </tr>
                             <?php
                         }
@@ -1286,10 +1491,10 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
             <script>
             (function(){
                 var summary = {
-                    deposit: <?php echo json_encode(number_format($sum_deposit_received, 2, ',', '.')); ?>,
-                    remaining: <?php echo json_encode(number_format($sum_remaining, 2, ',', '.')); ?>,
-                    forecast: <?php echo json_encode(number_format($sum_forecast, 2, ',', '.')); ?>,
-                    refunds: <?php echo json_encode(number_format($sum_refunds, 2, ',', '.')); ?>
+                    deposit: <?php echo json_encode(number_format($sum_deposit_received, 0, ',', '.')); ?>,
+                    remaining: <?php echo json_encode(number_format($sum_remaining, 0, ',', '.')); ?>,
+                    forecast: <?php echo json_encode(number_format($sum_forecast, 0, ',', '.')); ?>,
+                    refunds: <?php echo json_encode(number_format($sum_refunds, 0, ',', '.')); ?>
                 };
                 var setText = function(id, value){
                     var el = document.getElementById(id);
@@ -1484,7 +1689,7 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                         <tr>
                             <td><?php echo $apt->id; ?></td>
                             <td><?php echo esc_html($apt->name); ?></td>
-                            <td>€<?php echo number_format($apt->base_price, 2); ?></td>
+                            <td>€<?php echo number_format($apt->base_price, 0); ?></td>
                             <td>
                                 <form method="POST" style="display: inline;">
                                     <?php wp_nonce_field('paguro_apt_nonce'); ?>
@@ -2189,6 +2394,18 @@ if (isset($_POST['paguro_manual_booking']) && check_admin_referer('paguro_manual
                             <th>Titolo Sezione "Azioni"</th>
                             <td>
                                 <input type="text" name="ui_section_actions" value="<?php echo esc_attr(get_option('paguro_msg_ui_section_actions', 'Azioni')); ?>" style="width:100%; max-width: 300px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Descrizione Azioni (Distinta presente)</th>
+                            <td>
+                                <input type="text" name="ui_group_actions_ready" value="<?php echo esc_attr(get_option('paguro_msg_ui_group_actions_ready', 'Gestisci le date')); ?>" style="width:100%; max-width: 700px;">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Descrizione Azioni (Distinta assente)</th>
+                            <td>
+                                <textarea name="ui_group_actions_locked" rows="2" style="width:100%; max-width: 900px;"><?php echo esc_textarea(get_option('paguro_msg_ui_group_actions_locked', "Quest'area sarà disponibile dopo aver caricato la distinta.")); ?></textarea>
                             </td>
                         </tr>
                         <tr>

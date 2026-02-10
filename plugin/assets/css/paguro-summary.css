@@ -397,6 +397,18 @@
     gap: 8px;
 }
 
+.paguro-group-action-link.is-disabled {
+    opacity: 0.6;
+    pointer-events: none;
+    cursor: not-allowed;
+}
+
+.paguro-group-actions-note {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    color: #555;
+}
+
 .pricing-value {
     font-size: 14px;
     font-weight: 600;

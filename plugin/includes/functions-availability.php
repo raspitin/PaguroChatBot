@@ -19,6 +19,17 @@ if (!defined('ABSPATH')) exit;
 if (!defined('PAGURO_SOFT_LOCK_HOURS')) define('PAGURO_SOFT_LOCK_HOURS', 48);
 if (!defined('PAGURO_CANCELLATION_DAYS')) define('PAGURO_CANCELLATION_DAYS', 15);
 
+function paguro_get_booking_total_cost($b) {
+    if (!$b) return 0;
+    if (isset($b->manual_price) && floatval($b->manual_price) > 0) {
+        return floatval($b->manual_price);
+    }
+    if (function_exists('paguro_calculate_quote')) {
+        return paguro_calculate_quote($b->apartment_id, $b->date_start, $b->date_end);
+    }
+    return 0;
+}
+
 // =========================================================
 // AVAILABILITY QUERIES
 // =========================================================
@@ -173,9 +184,11 @@ function paguro_calculate_group_totals($group_id, $bookings = null) {
         if (isset($b->status) && intval($b->status) === 3) {
             continue;
         }
-        $price = function_exists('paguro_calculate_quote')
-            ? paguro_calculate_quote($b->apartment_id, $b->date_start, $b->date_end)
-            : 0;
+        $price = function_exists('paguro_get_booking_total_cost')
+            ? paguro_get_booking_total_cost($b)
+            : (function_exists('paguro_calculate_quote')
+                ? paguro_calculate_quote($b->apartment_id, $b->date_start, $b->date_end)
+                : 0);
         $weeks[] = [
             'date_start' => $b->date_start,
             'date_end' => $b->date_end,
