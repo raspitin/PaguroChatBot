@@ -21,13 +21,22 @@ if (!defined('PAGURO_CANCELLATION_DAYS')) define('PAGURO_CANCELLATION_DAYS', 15)
 
 function paguro_get_booking_total_cost($b) {
     if (!$b) return 0;
+
+    $manual_discount = 0;
+    if (isset($b->manual_discount)) {
+        $manual_discount = max(0, floatval($b->manual_discount));
+    }
+
     if (isset($b->manual_price) && floatval($b->manual_price) > 0) {
-        return floatval($b->manual_price);
+        return max(0, floatval($b->manual_price) - $manual_discount);
     }
+
+    $total = 0;
     if (function_exists('paguro_calculate_quote')) {
-        return paguro_calculate_quote($b->apartment_id, $b->date_start, $b->date_end);
+        $total = floatval(paguro_calculate_quote($b->apartment_id, $b->date_start, $b->date_end));
     }
-    return 0;
+
+    return max(0, $total - $manual_discount);
 }
 
 // =========================================================
@@ -119,30 +128,78 @@ function paguro_get_group_bookings_with_apartment($group_id) {
     ));
 }
 
+if (!function_exists('paguro_normalize_season_code')) {
+    function paguro_normalize_season_code($season) {
+        $season = strtoupper(trim((string) $season));
+        if ($season === '') return '';
+        if (in_array($season, ['A', 'ALTA'], true) || strpos($season, 'ALTA') === 0) return 'A';
+        if (in_array($season, ['M', 'MEDIA'], true) || strpos($season, 'MEDIA') === 0) return 'M';
+        if (in_array($season, ['B', 'BASSA'], true) || strpos($season, 'BASSA') === 0) return 'B';
+        return '';
+    }
+}
+
 function paguro_parse_group_discount_map($raw) {
+    $map = [
+        'default' => [],
+        'A' => [],
+        'M' => [],
+        'B' => []
+    ];
     if (is_array($raw)) {
-        $map = [];
-        foreach ($raw as $k => $v) {
-            $key = intval($k);
-            $val = floatval($v);
-            if ($key > 0 && $val >= 0) $map[$key] = $val;
+        $has_nested = false;
+        foreach ($raw as $v) {
+            if (is_array($v)) {
+                $has_nested = true;
+                break;
+            }
         }
-        ksort($map);
+        if ($has_nested) {
+            foreach ($raw as $season_key => $values) {
+                if (!is_array($values)) continue;
+                $season_key = (string) $season_key;
+                $season = $season_key === 'default' ? 'default' : paguro_normalize_season_code($season_key);
+                if ($season_key !== 'default' && $season === '') continue;
+                foreach ($values as $k => $v) {
+                    $key = intval($k);
+                    $val = floatval($v);
+                    if ($key > 0 && $val >= 0) $map[$season][$key] = $val;
+                }
+            }
+        } else {
+            foreach ($raw as $k => $v) {
+                $key = intval($k);
+                $val = floatval($v);
+                if ($key > 0 && $val >= 0) $map['default'][$key] = $val;
+            }
+        }
+        foreach (['default', 'A', 'M', 'B'] as $s) {
+            if (!empty($map[$s])) ksort($map[$s]);
+        }
         return $map;
     }
     $raw = trim((string) $raw);
-    if ($raw === '') return [];
+    if ($raw === '') return $map;
     $pairs = preg_split('/[,\n;]+/', $raw);
-    $map = [];
     foreach ($pairs as $pair) {
         $pair = trim($pair);
         if ($pair === '') continue;
-        if (!preg_match('/^(\d+)\s*=\s*([0-9]+(?:[.,][0-9]+)?)$/', $pair, $m)) continue;
-        $key = intval($m[1]);
-        $val = floatval(str_replace(',', '.', $m[2]));
-        if ($key > 0 && $val >= 0) $map[$key] = $val;
+        if (!preg_match('/^([a-zA-Z]+)?\s*(\d+)\s*=\s*([0-9]+(?:[.,][0-9]+)?)$/', $pair, $m)) continue;
+        $season_raw = isset($m[1]) ? trim($m[1]) : '';
+        $key = intval($m[2]);
+        $val = floatval(str_replace(',', '.', $m[3]));
+        if ($key <= 0 || $val < 0) continue;
+        if ($season_raw !== '') {
+            $season = paguro_normalize_season_code($season_raw);
+            if ($season === '') continue;
+            $map[$season][$key] = $val;
+        } else {
+            $map['default'][$key] = $val;
+        }
     }
-    ksort($map);
+    foreach (['default', 'A', 'M', 'B'] as $s) {
+        if (!empty($map[$s])) ksort($map[$s]);
+    }
     return $map;
 }
 
@@ -150,17 +207,29 @@ function paguro_format_group_discount_map($map) {
     $parsed = paguro_parse_group_discount_map($map);
     if (!$parsed) return '';
     $parts = [];
-    foreach ($parsed as $k => $v) {
-        $parts[] = $k . '=' . rtrim(rtrim(number_format($v, 2, '.', ''), '0'), '.');
+    $order = [
+        ['key' => 'default', 'prefix' => ''],
+        ['key' => 'B', 'prefix' => 'B'],
+        ['key' => 'M', 'prefix' => 'M'],
+        ['key' => 'A', 'prefix' => 'A']
+    ];
+    foreach ($order as $entry) {
+        $key = $entry['key'];
+        if (empty($parsed[$key]) || !is_array($parsed[$key])) continue;
+        foreach ($parsed[$key] as $k => $v) {
+            $parts[] = $entry['prefix'] . $k . '=' . rtrim(rtrim(number_format($v, 2, '.', ''), '0'), '.');
+        }
     }
     return implode(', ', $parts);
 }
 
-function paguro_get_group_discount_for_count($count) {
+function paguro_get_group_discount_for_count($count, $season = '') {
     $count = intval($count);
     if ($count < 2) return 0;
     $map = paguro_parse_group_discount_map(get_option('paguro_group_discount_map', ''));
-    return isset($map[$count]) ? floatval($map[$count]) : 0;
+    $season = paguro_normalize_season_code($season);
+    if ($season && isset($map[$season][$count])) return floatval($map[$season][$count]);
+    return isset($map['default'][$count]) ? floatval($map['default'][$count]) : 0;
 }
 
 function paguro_calculate_group_totals($group_id, $bookings = null) {
@@ -198,7 +267,46 @@ function paguro_calculate_group_totals($group_id, $bookings = null) {
         $total_raw += $price;
     }
     $weeks_count = count($weeks);
-    $discount = paguro_get_group_discount_for_count($weeks_count);
+    $discount = 0;
+    $season_counts = [
+        'A' => 0,
+        'M' => 0,
+        'B' => 0,
+        'default' => 0
+    ];
+    $season_cache = [];
+    foreach ($weeks as $week) {
+        $booking = $week['booking'] ?? null;
+        if (!$booking || empty($booking->apartment_id)) {
+            $season_counts['default']++;
+            continue;
+        }
+        $week_key = $week['date_start'];
+        $apt_id = intval($booking->apartment_id);
+        if (!isset($season_cache[$apt_id])) {
+            $apt = function_exists('paguro_get_apartment') ? paguro_get_apartment($apt_id) : null;
+            $decoded = $apt && !empty($apt->pricing_json) ? json_decode($apt->pricing_json, true) : [];
+            $season_cache[$apt_id] = is_array($decoded) ? $decoded : [];
+        }
+        $entry = $season_cache[$apt_id][$week_key] ?? null;
+        $season = '';
+        if (is_array($entry)) {
+            $season = paguro_normalize_season_code($entry['season'] ?? '');
+        }
+        if ($season === '') {
+            $season_counts['default']++;
+        } else {
+            $season_counts[$season]++;
+        }
+    }
+    foreach (['B', 'M', 'A'] as $s) {
+        if ($season_counts[$s] >= 2) {
+            $discount += paguro_get_group_discount_for_count($season_counts[$s], $s);
+        }
+    }
+    if ($season_counts['default'] >= 2) {
+        $discount += paguro_get_group_discount_for_count($season_counts['default']);
+    }
     $total_final = max(0, $total_raw - $discount);
     $deposit_percent = intval(get_option('paguro_deposit_percent', 30));
     $deposit = $total_final > 0 ? ceil($total_final * ($deposit_percent / 100)) : 0;
@@ -767,5 +875,3 @@ function paguro_trigger_waitlist_alerts($apt_id, $date_start, $date_end) {
     
     return $count;
 }
-
-?>

@@ -25,7 +25,18 @@ function paguro_build_email_html($content, $subject = 'Villa Celi', $is_admin = 
         $content .= $has_html ? '<br><br>' . $privacy_txt : "\n\n" . $privacy_txt;
     }
 
+    if (!$has_html && strpos((string) $content, '&lt;') !== false && strpos((string) $content, '&gt;') !== false) {
+        $decoded_content = html_entity_decode((string) $content, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        if (preg_match('/<[^>]+>/', $decoded_content)) {
+            $content = $decoded_content;
+            $has_html = true;
+        }
+    }
+
     $content = $has_html ? $content : nl2br(esc_html($content));
+    if ($has_html) {
+        $content = paguro_email_normalize_images($content);
+    }
     
     $html = '<!DOCTYPE html>
 <html>
@@ -72,7 +83,8 @@ function paguro_build_email_html($content, $subject = 'Villa Celi', $is_admin = 
 function paguro_send_email($to, $subject, $body, $is_admin = false) {
     if (!is_email($to)) return false;
     
-    $html = paguro_build_email_html($body, $subject, $is_admin);
+    $mail_marker = '<!-- PAGURO_EMAIL -->';
+    $html = $mail_marker . paguro_build_email_html($body, $subject, $is_admin);
     $from_email = get_option('paguro_mail_from', 'info@villaceli.it');
     if (!is_email($from_email)) {
         $from_email = 'info@villaceli.it';
@@ -82,8 +94,22 @@ function paguro_send_email($to, $subject, $body, $is_admin = false) {
         'Content-Type: text/html; charset=UTF-8',
         'From: ' . $from_name . ' <' . $from_email . '>'
     ];
-    
+
+    // Ensure final HTML (including emojis converted by WP) has Outlook-safe icon dimensions.
+    $normalize_mail_filter = function($atts) use ($mail_marker) {
+        if (!is_array($atts)) return $atts;
+        if (empty($atts['message']) || strpos($atts['message'], $mail_marker) === false) {
+            return $atts;
+        }
+        $atts['message'] = str_replace($mail_marker, '', $atts['message']);
+        $atts['message'] = paguro_email_normalize_images($atts['message']);
+        return $atts;
+    };
+
+    add_filter('wp_mail', $normalize_mail_filter, 1000);
     $sent = wp_mail($to, $subject, $html, $headers);
+    remove_filter('wp_mail', $normalize_mail_filter, 1000);
+
     if (!$sent) {
         error_log('[Paguro] wp_mail failed: to=' . $to . ' subject=' . $subject);
     }
@@ -108,9 +134,28 @@ if (!function_exists('paguro_mask_iban')) {
     }
 }
 
+if (!function_exists('paguro_get_apartment_public_url')) {
+    function paguro_get_apartment_public_url($apartment_id, $fallback = '')
+    {
+        $fallback = esc_url((string) $fallback);
+        $apartment_id = intval($apartment_id);
+        if ($apartment_id <= 0) return $fallback;
+
+        global $wpdb;
+        $apt_url = $wpdb->get_var($wpdb->prepare(
+            "SELECT apt_url FROM {$wpdb->prefix}paguro_apartments WHERE id = %d",
+            $apartment_id
+        ));
+        if (!$apt_url) return $fallback;
+
+        return esc_url($apt_url);
+    }
+}
+
 function paguro_get_email_placeholders($b) {
     $apt_name_raw = isset($b->apt_name) ? $b->apt_name : '';
     $apt_name = $apt_name_raw ? ucfirst($apt_name_raw) : '';
+    $apt_link = paguro_get_apartment_public_url($b->apartment_id ?? 0, $b->apt_url ?? '');
 
     $page_slug = get_option('paguro_page_slug', 'riepilogo-prenotazione');
     $link_riepilogo = site_url("/{$page_slug}/?token={$b->lock_token}");
@@ -142,10 +187,12 @@ function paguro_get_email_placeholders($b) {
     $deposit_percent = intval(get_option('paguro_deposit_percent', 30));
     $deposit = $total_cost > 0 ? ceil($total_cost * ($deposit_percent / 100)) : 0;
     $remaining = $total_cost - $deposit;
+    $manual_discount = isset($b->manual_discount) ? max(0, floatval($b->manual_discount)) : 0;
 
     $total_cost_fmt = number_format($total_cost, 0, ',', '.');
     $deposit_cost_fmt = number_format($deposit, 0, ',', '.');
     $remaining_cost_fmt = number_format($remaining, 0, ',', '.');
+    $manual_discount_fmt = number_format($manual_discount, 0, ',', '.');
 
     $customer_iban = isset($b->customer_iban) ? $b->customer_iban : '';
     $customer_iban_norm = strtoupper(preg_replace('/\s+/', '', $customer_iban));
@@ -165,6 +212,7 @@ function paguro_get_email_placeholders($b) {
         'customer_iban_priv' => $customer_iban_priv,
         'apt_name' => $apt_name,
         'apt_name_raw' => $apt_name_raw,
+        'apt_link' => $apt_link,
         'date_start' => date('d/m/Y', strtotime($b->date_start)),
         'date_end' => date('d/m/Y', strtotime($b->date_end)),
         'date_start_raw' => $b->date_start,
@@ -180,6 +228,12 @@ function paguro_get_email_placeholders($b) {
         'total_cost_raw' => $total_cost,
         'deposit_cost_raw' => $deposit,
         'remaining_cost_raw' => $remaining,
+        'manual_discount' => $manual_discount_fmt,
+        'manual_discount_fmt' => $manual_discount_fmt,
+        'manual_discount_raw' => $manual_discount,
+        'discount_amount' => $manual_discount,
+        'discount_amount_fmt' => $manual_discount_fmt,
+        'discount_amount_raw' => $manual_discount,
         'total_cost_fmt' => $total_cost_fmt,
         'deposit_cost_fmt' => $deposit_cost_fmt,
         'remaining_cost_fmt' => $remaining_cost_fmt,
@@ -213,6 +267,17 @@ function paguro_escape_user_placeholders($placeholders) {
     return $safe;
 }
 
+
+function paguro_strip_quote_sensitive_placeholders($placeholders) {
+    $safe = $placeholders;
+    foreach (['iban', 'intestatario', 'receipt_url', 'receipt_uploaded_at', 'receipt_uploaded_at_fmt'] as $key) {
+        if (isset($safe[$key])) {
+            $safe[$key] = '';
+        }
+    }
+    return $safe;
+}
+
 function paguro_build_group_weeks_html($weeks) {
     if (!$weeks) return '';
     $html = '<ul>';
@@ -224,6 +289,64 @@ function paguro_build_group_weeks_html($weeks) {
     $html .= '</ul>';
     return $html;
 }
+
+function paguro_email_normalize_images($html, $icon_size = 32, $emoji_size = 18) {
+    if (stripos($html, '<img') === false) return $html;
+
+    $default_size = max(16, intval($icon_size));
+    $emoji_size = max(14, intval($emoji_size));
+
+    return preg_replace_callback('/<img\b([^>]*)>/i', function($match) use ($default_size, $emoji_size) {
+        $attrs = trim($match[1]);
+        $attrs = preg_replace('/\s*\/\s*$/', '', $attrs);
+
+        $is_emoji = false;
+        if (preg_match('/\bclass\s*=\s*([\'"])(.*?)\1/i', $attrs, $cm)) {
+            $classes = strtolower($cm[2]);
+            if (strpos($classes, 'wp-smiley') !== false || strpos($classes, 'emoji') !== false) {
+                $is_emoji = true;
+            }
+        }
+        if (!$is_emoji && preg_match('/\balt\s*=\s*([\'"])(.*?)\1/i', $attrs, $am)) {
+            $alt = trim($am[2]);
+            if ($alt !== '' && preg_match('/^(?:[\x{2600}-\x{27BF}]|[\x{1F300}-\x{1FAFF}])+$/u', $alt)) {
+                $is_emoji = true;
+            }
+        }
+        if (!$is_emoji && preg_match('/\bsrc\s*=\s*([\'"])(.*?)\1/i', $attrs, $sm)) {
+            $src = strtolower($sm[2]);
+            if (strpos($src, '/emoji/') !== false || strpos($src, 'twemoji') !== false) {
+                $is_emoji = true;
+            }
+        }
+
+        $size = $is_emoji ? $emoji_size : $default_size;
+
+        // Remove hard-coded dimensions to avoid giant icons in Outlook.
+        $attrs = preg_replace('/\s+(width|height)\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)/i', '', $attrs);
+
+        $style_add = 'display:inline-block; width:' . $size . 'px !important; height:' . $size . 'px !important; max-width:' . $size . 'px !important; max-height:' . $size . 'px !important; vertical-align: middle; line-height: 1;';
+
+        if (preg_match('/\bstyle\s*=\s*([\'"])(.*?)\1/i', $attrs, $sm)) {
+            $style = trim($sm[2]);
+            $style = preg_replace('/(?:^|;)\s*(?:width|height|max-width|max-height)\s*:[^;]*/i', '', $style);
+            $style = trim($style, " \t\n\r;");
+            if ($style !== '') {
+                $style .= '; ';
+            }
+            $style .= $style_add;
+            $attrs = preg_replace('/\bstyle\s*=\s*([\'"])(.*?)\1/i', 'style="' . $style . '"', $attrs, 1);
+        } else {
+            $attrs .= ' style="' . $style_add . '"';
+        }
+
+        $attrs = trim($attrs);
+        if ($attrs !== '') $attrs = ' ' . $attrs;
+
+        return '<img' . $attrs . ' width="' . $size . '" height="' . $size . '" />';
+    }, $html);
+}
+
 
 function paguro_get_group_email_placeholders($group_id) {
     if (!function_exists('paguro_get_group_bookings_with_apartment')) return [];
@@ -251,6 +374,7 @@ function paguro_get_group_email_placeholders($group_id) {
     $page_slug = get_option('paguro_page_slug', 'riepilogo-prenotazione');
     $link_riepilogo = site_url("/{$page_slug}/?token={$group_id}");
     $booking_url = site_url("/" . get_option('paguro_checkout_slug', 'prenotazione') . "/");
+    $apt_link = paguro_get_apartment_public_url($first->apartment_id ?? 0, $first->apt_url ?? '');
 
     $date_start = $active[0]->date_start;
     $date_end = $active[count($active) - 1]->date_end;
@@ -274,6 +398,7 @@ function paguro_get_group_email_placeholders($group_id) {
         'guest_phone' => $first->guest_phone,
         'apt_name' => ucfirst($first->apt_name),
         'apt_name_raw' => $first->apt_name,
+        'apt_link' => $apt_link,
         'date_start' => date('d/m/Y', strtotime($date_start)),
         'date_end' => date('d/m/Y', strtotime($date_end)),
         'date_start_raw' => $date_start,
@@ -372,6 +497,7 @@ function paguro_send_quote_request_to_user($booking_id) {
     }
     
     $placeholders = paguro_get_email_placeholders($b);
+    $placeholders = paguro_strip_quote_sensitive_placeholders($placeholders);
     
     $subject = paguro_parse_template(
         get_option('paguro_txt_email_request_subj', 'Conferma Richiesta Preventivo: {apt_name}'),
@@ -815,6 +941,7 @@ function paguro_send_group_receipt_received_to_admin($group_id) {
 function paguro_send_group_quote_request_to_user($group_id) {
     $placeholders = paguro_get_group_email_placeholders($group_id);
     if (empty($placeholders) || !is_email($placeholders['guest_email'] ?? '')) return false;
+    $placeholders = paguro_strip_quote_sensitive_placeholders($placeholders);
     $placeholders = paguro_escape_user_placeholders($placeholders);
 
     $subject = paguro_parse_template(
@@ -1080,4 +1207,3 @@ function paguro_send_waitlist_confirmation_to_admin($booking_id) {
     );
 }
 
-?>

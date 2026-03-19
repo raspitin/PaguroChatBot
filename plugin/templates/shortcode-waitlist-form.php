@@ -93,5 +93,3 @@ function paguro_shortcode_waitlist_form() {
 }
 
 add_shortcode('paguro_waitlist_form', 'paguro_shortcode_waitlist_form');
-
-?>

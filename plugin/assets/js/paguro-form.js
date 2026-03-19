@@ -13,11 +13,36 @@ jQuery(document).ready(function($) {
         recaptcha_site: '',
         msgs: {}
     };
+    const analytics = window.paguroAnalytics || null;
+
+    function trackEvent(name, payload) {
+        if (!analytics || typeof analytics.track !== 'function') return;
+        analytics.track(name, payload || {});
+    }
+
+    function getSessionId() {
+        if (!analytics || typeof analytics.getSessionId !== 'function') {
+            return 'sess_' + Date.now();
+        }
+        return analytics.getSessionId();
+    }
     function showOverlayMessage(msg, type) {
         if (window.paguroUi && typeof window.paguroUi.showMessage === 'function') {
             window.paguroUi.showMessage(msg, type);
         } else {
             alert(msg);
+        }
+    }
+
+    function showSubmitOverlay(msg) {
+        if (window.paguroUi && typeof window.paguroUi.showLoading === 'function') {
+            window.paguroUi.showLoading(msg);
+        }
+    }
+
+    function closeSubmitOverlay() {
+        if (window.paguroUi && typeof window.paguroUi.close === 'function') {
+            window.paguroUi.close();
         }
     }
 
@@ -103,6 +128,29 @@ jQuery(document).ready(function($) {
         chatBody.scrollTop(chatBody[0].scrollHeight);
     }
 
+    function appendPendingBotMsg(chatBody, label) {
+        var safeLabel = $('<div/>').text(label || 'Paguro sta verificando').html();
+        var pendingId = 'paguro-pending-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+        chatBody.append(
+            '<div class="paguro-msg paguro-msg-bot paguro-msg-pending" data-pending-id="' + pendingId + '" role="status" aria-live="polite">' +
+            '<img src="' + data.icon_url + '" class="paguro-bot-avatar" alt="Paguro">' +
+            '<div class="paguro-msg-content">' +
+            '<span class="paguro-pending-label">' + safeLabel + '</span>' +
+            '<span class="paguro-typing-dots" aria-hidden="true">' +
+            '<span></span><span></span><span></span>' +
+            '</span>' +
+            '</div>' +
+            '</div>'
+        );
+        chatBody.scrollTop(chatBody[0].scrollHeight);
+        return pendingId;
+    }
+
+    function removePendingBotMsg(chatBody, pendingId) {
+        if (!pendingId) return;
+        chatBody.find('.paguro-msg-pending[data-pending-id="' + pendingId + '"]').remove();
+    }
+
     function clearSelections(panel) {
         multiState.selections = [];
         multiState.apt = null;
@@ -137,9 +185,23 @@ jQuery(document).ready(function($) {
         if (existingIndex >= 0) {
             multiState.selections.splice(existingIndex, 1);
             btn.removeClass('is-selected').text('[Seleziona]');
+            trackEvent('week_deselected', {
+                page_type: 'chat',
+                apt_name: apt,
+                date_start: dateIn,
+                date_end: dateOut,
+                selection_count: multiState.selections.length
+            });
         } else {
             multiState.selections.push({ in: dateIn, out: dateOut });
             btn.addClass('is-selected').text('[Selezionata]');
+            trackEvent('week_selected', {
+                page_type: 'chat',
+                apt_name: apt,
+                date_start: dateIn,
+                date_end: dateOut,
+                selection_count: multiState.selections.length
+            });
         }
         updateMultiPanel(panel);
     });
@@ -152,10 +214,17 @@ jQuery(document).ready(function($) {
             showOverlayMessage('Seleziona almeno una settimana prima di confermare.', 'warning');
             return;
         }
+        trackEvent('multiweek_confirm_clicked', {
+            page_type: 'chat',
+            apt_name: multiState.apt,
+            weeks_count: multiState.selections.length
+        });
 
         var triedRefresh = false;
         var chatRoot = btn.closest('.paguro-chat-window, .paguro-chat-root');
         var chatBody = chatRoot.find('.paguro-chat-body');
+        var pendingId = appendPendingBotMsg(chatBody, 'Paguro sta verificando le settimane');
+        btn.addClass('is-disabled').prop('disabled', true);
 
         function sendMultiLock() {
             withRecaptcha('paguro_lock_multi', function(token) {
@@ -164,8 +233,12 @@ jQuery(document).ready(function($) {
                     nonce: data.nonce,
                     recaptcha_token: token || '',
                     apt_name: multiState.apt,
-                    dates: JSON.stringify(multiState.selections)
+                    dates: JSON.stringify(multiState.selections),
+                    session_id: getSessionId(),
+                    page_path: window.location.pathname || '',
+                    page_type: 'chat'
                 }, function(res) {
+                    removePendingBotMsg(chatBody, pendingId);
                     if (res.success) {
                         var targetUrl = res.data.redirect_url ? res.data.redirect_url : (data.booking_url + res.data.redirect_params);
                         window.location.href = targetUrl;
@@ -175,6 +248,7 @@ jQuery(document).ready(function($) {
                             triedRefresh = true;
                             refreshNonce().then(sendMultiLock).catch(function() {
                                 showOverlayMessage("⚠️ " + errMsgRaw, 'error');
+                                btn.removeClass('is-disabled').prop('disabled', false);
                             });
                             return;
                         }
@@ -197,9 +271,12 @@ jQuery(document).ready(function($) {
                             appendBotMsg(chatBody, res.data.suggestions_html);
                         }
                         showOverlayMessage("⚠️ " + errMsgRaw, 'error');
+                        btn.removeClass('is-disabled').prop('disabled', false);
                     }
                 }).fail(function() {
+                    removePendingBotMsg(chatBody, pendingId);
                     showOverlayMessage("❌ Errore di connessione", 'error');
+                    btn.removeClass('is-disabled').prop('disabled', false);
                 });
             });
         }
@@ -221,34 +298,42 @@ jQuery(document).ready(function($) {
         var form = $(this);
         var btn = form.find('#paguro-submit-btn');
         var msgDiv = form.find('#paguro-form-msg');
+        var hasLoadingOverlay = !!(window.paguroUi && typeof window.paguroUi.showLoading === 'function');
 
         btn.prop('disabled', true);
         msgDiv.html('').removeClass('error success');
+        showSubmitOverlay(data.msgs.form_submitting || 'Un attimo: stiamo inviando la tua richiesta.');
 
         var triedRefresh = false;
 
         function postForm(formData) {
             $.post(data.ajax_url, formData, function(res) {
                 if (res.success) {
-                    msgDiv
-                        .html('<span class="success">✅ ' + (data.msgs.form_success || 'Richiesta inviata!') + '</span>')
-                        .addClass('success');
+                    if (hasLoadingOverlay) {
+                        showSubmitOverlay(data.msgs.form_redirecting || 'Richiesta ricevuta. Ti stiamo portando al riepilogo...');
+                    } else {
+                        msgDiv
+                            .html('<span class="success">✅ ' + (data.msgs.form_success || 'Richiesta inviata!') + '</span>')
+                            .addClass('success');
+                    }
 
-                    // Redirect dopo 1.5 secondi
+                    // Redirect dopo una breve conferma visiva
                     setTimeout(function() {
                         window.location.href = res.data.redirect;
-                    }, 1500);
+                    }, 900);
                 } else {
                     var errMsgRaw = res.data && res.data.msg ? res.data.msg : "Errore sconosciuto";
                     if (!triedRefresh && /sessione scaduta/i.test(errMsgRaw)) {
                         triedRefresh = true;
                         refreshNonce().then(sendForm).catch(function() {
+                            closeSubmitOverlay();
                             var errMsg = $('<div/>').text(errMsgRaw).html();
                             msgDiv.html('<span class="error">❌ ' + errMsg + '</span>').addClass('error');
                             btn.prop('disabled', false);
                         });
                         return;
                     }
+                    closeSubmitOverlay();
                     // Escape user input per evitare XSS
                     var errMsg = $('<div/>').text(errMsgRaw).html();
                     msgDiv
@@ -257,6 +342,7 @@ jQuery(document).ready(function($) {
                     btn.prop('disabled', false);
                 }
             }).fail(function() {
+                closeSubmitOverlay();
                 msgDiv
                     .html('<span class="error">❌ Errore di connessione</span>')
                     .addClass('error');
@@ -265,7 +351,12 @@ jQuery(document).ready(function($) {
         }
 
         function sendForm() {
-            var baseData = form.serialize() + '&action=paguro_submit_booking&nonce=' + data.nonce;
+            var pageType = form.is('#paguro-waitlist-form') ? 'waitlist_form' : 'quote_form';
+            var baseData = form.serialize() +
+                '&action=paguro_submit_booking&nonce=' + encodeURIComponent(data.nonce) +
+                '&session_id=' + encodeURIComponent(getSessionId()) +
+                '&page_path=' + encodeURIComponent(window.location.pathname || '') +
+                '&page_type=' + encodeURIComponent(pageType);
             withRecaptcha('paguro_booking', function(token) {
                 var payload = baseData + (token ? '&recaptcha_token=' + encodeURIComponent(token) : '');
                 postForm(payload);
@@ -287,6 +378,9 @@ jQuery(document).ready(function($) {
         e.preventDefault();
         var btn = $(this);
         var oldTxt = btn.text();
+        var chatRoot = btn.closest('.paguro-chat-window, .paguro-chat-root');
+        var chatBody = chatRoot.find('.paguro-chat-body');
+        var pendingId = appendPendingBotMsg(chatBody, 'Paguro sta verificando la disponibilita');
         btn.text(data.msgs.btn_locking).prop('disabled', true);
 
         var triedRefresh = false;
@@ -299,8 +393,12 @@ jQuery(document).ready(function($) {
                     recaptcha_token: token || '',
                     apt_name: btn.data('apt'),
                     date_in: btn.data('in'),
-                    date_out: btn.data('out')
+                    date_out: btn.data('out'),
+                    session_id: getSessionId(),
+                    page_path: window.location.pathname || '',
+                    page_type: 'chat'
                 }, function(res) {
+                    removePendingBotMsg(chatBody, pendingId);
                     if (res.success) {
                         btn.text('Apro il form...');
                         var targetUrl = res.data.redirect_url ? res.data.redirect_url : (data.booking_url + res.data.redirect_params);
@@ -323,6 +421,7 @@ jQuery(document).ready(function($) {
                         btn.text(oldTxt).prop('disabled', false);
                     }
                 }).fail(function() {
+                    removePendingBotMsg(chatBody, pendingId);
                     var msgDiv = $('<div class="paguro-form-message error">❌ Errore di connessione</div>');
                     btn.before(msgDiv);
                     btn.text(oldTxt).prop('disabled', false);
@@ -345,6 +444,9 @@ jQuery(document).ready(function($) {
         e.preventDefault();
         var btn = $(this);
         var oldTxt = btn.text();
+        var chatRoot = btn.closest('.paguro-chat-window, .paguro-chat-root');
+        var chatBody = chatRoot.find('.paguro-chat-body');
+        var pendingId = appendPendingBotMsg(chatBody, 'Paguro sta verificando la lista di attesa');
         btn.text('⏳ ...').prop('disabled', true);
 
         var triedRefresh = false;
@@ -357,8 +459,12 @@ jQuery(document).ready(function($) {
                     recaptcha_token: token || '',
                     apt_name: btn.data('apt'),
                     date_in: btn.data('in'),
-                    date_out: btn.data('out')
+                    date_out: btn.data('out'),
+                    session_id: getSessionId(),
+                    page_path: window.location.pathname || '',
+                    page_type: 'chat'
                 }, function(res) {
+                    removePendingBotMsg(chatBody, pendingId);
                     if (res.success) {
                         window.location.href = data.booking_url + res.data.redirect_params;
                     } else {
@@ -375,6 +481,7 @@ jQuery(document).ready(function($) {
                         btn.text(oldTxt).prop('disabled', false);
                     }
                 }).fail(function() {
+                    removePendingBotMsg(chatBody, pendingId);
                     showOverlayMessage("❌ Errore di connessione", 'error');
                     btn.text(oldTxt).prop('disabled', false);
                 });
@@ -387,5 +494,19 @@ jQuery(document).ready(function($) {
             sendWaitlist();
         }
     });
+
+    if ($('#paguro-quote-form').length) {
+        trackEvent('quote_form_viewed', {
+            page_type: 'quote_form',
+            token_present: !!$('#paguro-quote-form [name="token"]').val()
+        });
+    }
+
+    if ($('#paguro-waitlist-form').length) {
+        trackEvent('waitlist_form_viewed', {
+            page_type: 'waitlist_form',
+            token_present: !!$('#paguro-waitlist-form [name="token"]').val()
+        });
+    }
 
 });

@@ -13,6 +13,12 @@ jQuery(document).ready(function($) {
         recaptcha_site: '',
         msgs: {}
     };
+    const analytics = window.paguroAnalytics || null;
+
+    function trackEvent(name, payload) {
+        if (!analytics || typeof analytics.track !== 'function') return;
+        analytics.track(name, payload || {});
+    }
 
     function refreshNonce() {
         return $.post(data.ajax_url, { action: 'paguro_refresh_nonce' }).then(function(res) {
@@ -68,6 +74,9 @@ jQuery(document).ready(function($) {
         var targetId = $(this).data('target') || 'paguro-secure-area';
         $('#' + targetId).show();
         $(this).hide();
+        trackEvent('summary_secure_area_opened', {
+            page_type: 'summary'
+        });
     });
 
     $(document).on('change', '#paguro-file-input', function() {
@@ -170,6 +179,11 @@ jQuery(document).ready(function($) {
         $('#paguro-upload-success-container')
             .html(successHtml)
             .slideDown(300);
+
+        trackEvent('receipt_uploaded', {
+            page_type: 'summary',
+            upload_success: true
+        });
 
         // Disabilita input file
         $('#paguro-file-input').prop('disabled', true);

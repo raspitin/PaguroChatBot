@@ -15,7 +15,7 @@ function paguro_shortcode_summary_quote() {
         'summary_title' => get_option('paguro_msg_ui_summary_title', 'Riepilogo preventivo'),
         'missing_token' => get_option('paguro_msg_ui_missing_token', 'Codice di accesso mancante.'),
         'auth_title' => get_option('paguro_msg_ui_auth_title', 'Area riservata'),
-        'auth_help_quote' => get_option('paguro_msg_ui_auth_help_quote', "Inserisci l'email usata per la richiesta."),
+        'auth_help_quote' => get_option('paguro_msg_ui_auth_help_quote', "Inserisci l'email usata per la richiesta. Ti abbiamo inviato una email con il riepilogo del preventivo."),
         'auth_email_label' => get_option('paguro_msg_ui_auth_email_label', 'Email *'),
         'auth_submit' => get_option('paguro_msg_ui_auth_submit', 'Accedi'),
         'auth_error' => get_option('paguro_msg_ui_auth_error', 'Email non trovata.'),
@@ -34,6 +34,9 @@ function paguro_shortcode_summary_quote() {
         'section_payment' => get_option('paguro_msg_ui_section_payment', 'Bonifico'),
         'section_upload' => get_option('paguro_msg_ui_section_upload', 'Carica distinta'),
         'section_uploaded' => get_option('paguro_msg_ui_section_uploaded', 'Distinta ricevuta'),
+        'summary_email_notice' => get_option('paguro_msg_ui_summary_email_notice', 'Riceverai una email con il riepilogo del preventivo. Da questa area puoi aprire la sezione operativa.'),
+        'secure_area_cta' => get_option('paguro_msg_ui_secure_area_cta', 'Visualizza dati beneficiario e upload distinta'),
+        'secure_area_intro' => get_option('paguro_msg_ui_secure_area_intro', 'Per completare la procedura apri la sezione operativa qui sotto.'),
         'section_actions' => get_option('paguro_msg_ui_section_actions', 'Azioni'),
         'label_guest' => get_option('paguro_msg_ui_label_guest', 'Ospite'),
         'label_email' => get_option('paguro_msg_ui_label_email', 'Email'),
@@ -171,6 +174,39 @@ function paguro_shortcode_summary_quote() {
                                 $group_status = $all_cancelled ? 'Cancellata' : ($all_confirmed ? 'Confermata' : ($any_confirmed ? 'Parziale' : 'Preventivo'));
                                 $is_multi_week = ($totals['weeks_count'] > 1);
                                 $can_manage_weeks = !empty($receipt_url);
+                                $group_summary_tpl = get_option('paguro_msg_ui_summary_page', '<div>...</div>');
+                                $group_summary_confirm_tpl = get_option('paguro_msg_ui_summary_confirm_page', '');
+                                if ($group_summary_confirm_tpl === '') {
+                                    $group_summary_confirm_tpl = '<p><strong>Prenotazione confermata.</strong></p>' .
+                                        '<p>{apt_name} | {date_start} - {date_end}</p>' .
+                                        '<p>Riceverai una email con il riepilogo del preventivo e le istruzioni per accedere all\'area personale.</p>';
+                                }
+                                $group_template_to_use = ($all_confirmed && !empty($group_summary_confirm_tpl)) ? $group_summary_confirm_tpl : $group_summary_tpl;
+                                $group_ph = function_exists('paguro_get_group_email_placeholders') ? paguro_get_group_email_placeholders($token) : [];
+                                if (empty($group_ph)) {
+                                    $group_ph = [
+                                        'guest_name' => $first->guest_name,
+                                        'guest_email' => $first->guest_email,
+                                        'guest_phone' => $first->guest_phone,
+                                        'apt_name' => ucfirst($first->apt_name),
+                                        'date_start' => date('d/m/Y', strtotime($group_bookings[0]->date_start)),
+                                        'date_end' => date('d/m/Y', strtotime($group_bookings[count($group_bookings) - 1]->date_end)),
+                                        'total_cost' => number_format($total_final, 0, ',', '.'),
+                                        'deposit_cost' => number_format($deposit, 0, ',', '.'),
+                                        'remaining_cost' => number_format($remaining, 0, ',', '.'),
+                                        'discount_amount' => $discount,
+                                        'discount_amount_fmt' => number_format($discount, 0, ',', '.'),
+                                        'discount_amount_raw' => $discount,
+                                        'deposit_percent' => $deposit_percent,
+                                        'link_riepilogo' => site_url("/" . get_option('paguro_page_slug') . "/?token={$token}")
+                                    ];
+                                }
+                                $group_ph_public = $group_ph;
+                                foreach (['iban', 'intestatario', 'receipt_url', 'receipt_uploaded_at', 'receipt_uploaded_at_fmt'] as $sensitive_key) {
+                                    if (isset($group_ph_public[$sensitive_key])) {
+                                        $group_ph_public[$sensitive_key] = '';
+                                    }
+                                }
                                 ?>
                                 <div class="paguro-group-summary">
                                     <?php if ($is_multi_week): ?>
@@ -248,78 +284,94 @@ function paguro_shortcode_summary_quote() {
                                         </div>
                                     </div>
 
-                                    <?php if (empty($receipt_url)): ?>
-                                        <div class="paguro-section paguro-section-payment paguro-section-collapsible is-collapsed">
-                                            <h3 class="paguro-section-heading">
-                                                <button type="button" class="paguro-section-toggle" aria-expanded="false">
-                                                    <span class="paguro-section-title"><?php echo esc_html($ui['section_payment']); ?></span>
-                                                    <span class="paguro-section-icon" aria-hidden="true"></span>
-                                                </button>
-                                            </h3>
-                                            <div class="paguro-section-body">
-                                                <div class="paguro-bank-info">
-                                                    <div class="bank-item">
-                                                        <label><?php echo esc_html($ui['label_owner']); ?></label>
-                                                        <strong><?php echo esc_html(get_option('paguro_bank_owner')); ?></strong>
-                                                    </div>
-                                                    <div class="bank-item">
-                                                        <label><?php echo esc_html($ui['label_iban']); ?></label>
-                                                        <code><?php echo esc_html(get_option('paguro_bank_iban')); ?></code>
-                                                    </div>
-                                                    <div class="bank-item">
-                                                        <label><?php echo esc_html($ui['label_amount']); ?></label>
-                                                        <strong>€ <?php echo number_format($deposit, 0, ',', '.'); ?></strong>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
+                                    <div class="paguro-custom-content">
+                                        <?php echo wp_kses_post(paguro_parse_template($group_template_to_use, $group_ph_public)); ?>
+                                    </div>
 
-                                        <div class="paguro-section paguro-section-upload paguro-section-collapsible is-collapsed">
-                                            <h3 class="paguro-section-heading">
-                                                <button type="button" class="paguro-section-toggle" aria-expanded="false">
-                                                    <span class="paguro-section-title"><?php echo esc_html($ui['section_upload']); ?></span>
-                                                    <span class="paguro-section-icon" aria-hidden="true"></span>
-                                                </button>
-                                            </h3>
-                                            <div class="paguro-section-body">
-                                                <p class="paguro-upload-instruction">
-                                                    <?php echo esc_html(get_option('paguro_msg_ui_upload_instruction', 'Carica la distinta per bloccare le date.')); ?>
-                                                </p>
-                                                <label id="paguro-upload-area" class="paguro-upload-drop-zone" for="paguro-file-input">
-                                                    <div class="upload-icon">📁</div>
-                                                    <p class="upload-text"><?php echo esc_html($ui['upload_drop']); ?></p>
-                                                    <input type="file" id="paguro-file-input" style="display:none;" accept=".pdf,.jpg,.jpeg,.png,.gif">
-                                                </label>
-                                                <div id="paguro-upload-status" class="paguro-upload-status"></div>
-                                                <div id="paguro-upload-success-container" class="paguro-alert paguro-alert-success" style="display:none; margin-top:20px;">
-                                                    <h4><?php echo esc_html($ui['upload_success_title']); ?></h4>
-                                                    <p><?php echo esc_html($ui['upload_success_text']); ?></p>
-                                                    <div id="paguro-view-link"></div>
+                                    <div class="paguro-alert paguro-alert-info" style="margin-bottom:20px;">
+                                        <?php echo esc_html($ui['summary_email_notice']); ?>
+                                    </div>
+                                    <p style="margin-bottom:20px;">
+                                        <?php echo esc_html($ui['secure_area_intro']); ?>
+                                    </p>
+                                    <button type="button" id="paguro-show-secure-area" data-target="paguro-secure-area" class="paguro-btn paguro-btn-primary" style="margin-bottom:20px;">
+                                        <?php echo esc_html($ui['secure_area_cta']); ?>
+                                    </button>
+
+                                    <div id="paguro-secure-area" style="display:none;">
+                                        <?php if (empty($receipt_url)): ?>
+                                            <div class="paguro-section paguro-section-payment paguro-section-collapsible is-collapsed">
+                                                <h3 class="paguro-section-heading">
+                                                    <button type="button" class="paguro-section-toggle" aria-expanded="false">
+                                                        <span class="paguro-section-title"><?php echo esc_html($ui['section_payment']); ?></span>
+                                                        <span class="paguro-section-icon" aria-hidden="true"></span>
+                                                    </button>
+                                                </h3>
+                                                <div class="paguro-section-body">
+                                                    <div class="paguro-bank-info">
+                                                        <div class="bank-item">
+                                                            <label><?php echo esc_html($ui['label_owner']); ?></label>
+                                                            <strong><?php echo esc_html(get_option('paguro_bank_owner')); ?></strong>
+                                                        </div>
+                                                        <div class="bank-item">
+                                                            <label><?php echo esc_html($ui['label_iban']); ?></label>
+                                                            <code><?php echo esc_html(get_option('paguro_bank_iban')); ?></code>
+                                                        </div>
+                                                        <div class="bank-item">
+                                                            <label><?php echo esc_html($ui['label_amount']); ?></label>
+                                                            <strong>€ <?php echo number_format($deposit, 0, ',', '.'); ?></strong>
+                                                        </div>
+                                                    </div>
                                                 </div>
-                                                <input type="hidden" id="paguro-token" value="<?php echo esc_attr($token); ?>">
                                             </div>
-                                        </div>
-                                    <?php else: ?>
-                                        <div class="paguro-section paguro-section-uploaded paguro-section-collapsible is-collapsed">
-                                            <h3 class="paguro-section-heading">
-                                                <button type="button" class="paguro-section-toggle" aria-expanded="false">
-                                                    <span class="paguro-section-title"><?php echo esc_html($ui['section_uploaded']); ?></span>
-                                                    <span class="paguro-section-icon" aria-hidden="true"></span>
-                                                </button>
-                                            </h3>
-                                            <div class="paguro-section-body">
-                                                <div class="paguro-alert paguro-alert-info" style="margin-bottom:20px;">
-                                                    <?php echo esc_html($ui['receipt_pending']); ?>
+
+                                            <div class="paguro-section paguro-section-upload paguro-section-collapsible is-collapsed">
+                                                <h3 class="paguro-section-heading">
+                                                    <button type="button" class="paguro-section-toggle" aria-expanded="false">
+                                                        <span class="paguro-section-title"><?php echo esc_html($ui['section_upload']); ?></span>
+                                                        <span class="paguro-section-icon" aria-hidden="true"></span>
+                                                    </button>
+                                                </h3>
+                                                <div class="paguro-section-body">
+                                                    <p class="paguro-upload-instruction">
+                                                        <?php echo esc_html(get_option('paguro_msg_ui_upload_instruction', 'Carica la distinta per bloccare le date.')); ?>
+                                                    </p>
+                                                    <label id="paguro-upload-area" class="paguro-upload-drop-zone" for="paguro-file-input">
+                                                        <div class="upload-icon">📁</div>
+                                                        <p class="upload-text"><?php echo esc_html($ui['upload_drop']); ?></p>
+                                                        <input type="file" id="paguro-file-input" style="display:none;" accept=".pdf,.jpg,.jpeg,.png,.gif">
+                                                    </label>
+                                                    <div id="paguro-upload-status" class="paguro-upload-status"></div>
+                                                    <div id="paguro-upload-success-container" class="paguro-alert paguro-alert-success" style="display:none; margin-top:20px;">
+                                                        <h4><?php echo esc_html($ui['upload_success_title']); ?></h4>
+                                                        <p><?php echo esc_html($ui['upload_success_text']); ?></p>
+                                                        <div id="paguro-view-link"></div>
+                                                    </div>
+                                                    <input type="hidden" id="paguro-token" value="<?php echo esc_attr($token); ?>">
                                                 </div>
-                                                <div class="paguro-alert paguro-alert-success">
-                                                    <?php echo nl2br(esc_html($ui['receipt_uploaded_text'])); ?>
-                                                </div>
-                                                <a href="#" data-receipt-url="<?php echo esc_url($receipt_url); ?>" class="paguro-btn paguro-btn-secondary paguro-receipt-link">
-                                                    <?php echo esc_html($ui['receipt_view_cta']); ?>
-                                                </a>
                                             </div>
-                                        </div>
-                                    <?php endif; ?>
+                                        <?php else: ?>
+                                            <div class="paguro-section paguro-section-uploaded paguro-section-collapsible is-collapsed">
+                                                <h3 class="paguro-section-heading">
+                                                    <button type="button" class="paguro-section-toggle" aria-expanded="false">
+                                                        <span class="paguro-section-title"><?php echo esc_html($ui['section_uploaded']); ?></span>
+                                                        <span class="paguro-section-icon" aria-hidden="true"></span>
+                                                    </button>
+                                                </h3>
+                                                <div class="paguro-section-body">
+                                                    <div class="paguro-alert paguro-alert-info" style="margin-bottom:20px;">
+                                                        <?php echo esc_html($ui['receipt_pending']); ?>
+                                                    </div>
+                                                    <div class="paguro-alert paguro-alert-success">
+                                                        <?php echo nl2br(esc_html($ui['receipt_uploaded_text'])); ?>
+                                                    </div>
+                                                    <a href="#" data-receipt-url="<?php echo esc_url($receipt_url); ?>" class="paguro-btn paguro-btn-secondary paguro-receipt-link">
+                                                        <?php echo esc_html($ui['receipt_view_cta']); ?>
+                                                    </a>
+                                                </div>
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
 
                                     <div class="paguro-section paguro-section-actions">
                                         <h3><?php echo esc_html($ui['section_actions']); ?></h3>
@@ -408,6 +460,9 @@ function paguro_shortcode_summary_quote() {
                             $deposit_percent = intval(get_option('paguro_deposit_percent', 30)) / 100;
                             $deposit = ceil($total_cost * $deposit_percent);
                             $remaining = $total_cost - $deposit;
+                            $manual_discount = isset($b->manual_discount) ? max(0, floatval($b->manual_discount)) : 0;
+                            // Se lo sconto è inserito manualmente, azzera il campo "discount" automatico per evitare doppia stampa
+                            $discount_amount = ($manual_discount > 0) ? 0 : $manual_discount;
                             $is_confirmed = ($b->status == 1);
                             $is_cancel_requested = ($b->status == 5);
                             $can_cancel = current_time('timestamp') <= $cancel_deadline_dt->getTimestamp();
@@ -427,6 +482,14 @@ function paguro_shortcode_summary_quote() {
                                 'total_cost' => $total_cost,
                                 'deposit_cost' => $deposit,
                                 'remaining_cost' => $remaining,
+                                'manual_discount' => number_format($manual_discount, 0, ',', '.'),
+                                'manual_discount_fmt' => number_format($manual_discount, 0, ',', '.'),
+                                'manual_discount_raw' => $manual_discount,
+                                'discount_amount' => $discount_amount,
+                                'discount_amount_fmt' => ($discount_amount > 0)
+                                    ? number_format($discount_amount, 0, ',', '.')
+                                    : '',
+                                'discount_amount_raw' => $discount_amount,
                                 'total_cost_fmt' => number_format($total_cost, 0, ',', '.'),
                                 'deposit_cost_fmt' => number_format($deposit, 0, ',', '.'),
                                 'remaining_cost_fmt' => number_format($remaining, 0, ',', '.'),
@@ -451,6 +514,20 @@ function paguro_shortcode_summary_quote() {
                             $ph_safe = [];
                             foreach ($ph as $key => $val) {
                                 $ph_safe[$key] = esc_html((string) $val);
+                            }
+                            $summary_tpl = get_option('paguro_msg_ui_summary_page', '<div>...</div>');
+                            $summary_confirm_tpl = get_option('paguro_msg_ui_summary_confirm_page', '');
+                            if ($summary_confirm_tpl === '') {
+                                $summary_confirm_tpl = '<p><strong>Prenotazione confermata.</strong></p>' .
+                                    '<p>{apt_name} | {date_start} - {date_end}</p>' .
+                                    '<p>Riceverai una email con il riepilogo del preventivo e le istruzioni per accedere all\'area personale.</p>';
+                            }
+                            $template_to_use = ($is_confirmed && !empty($summary_confirm_tpl)) ? $summary_confirm_tpl : $summary_tpl;
+                            $ph_public = $ph;
+                            foreach (['iban', 'intestatario', 'receipt_url', 'receipt_uploaded_at', 'receipt_uploaded_at_fmt'] as $sensitive_key) {
+                                if (isset($ph_public[$sensitive_key])) {
+                                    $ph_public[$sensitive_key] = '';
+                                }
                             }
                             ?>
                             <div class="paguro-quote-summary">
@@ -510,99 +587,98 @@ function paguro_shortcode_summary_quote() {
                                         </div>
                                     </div>
                                 </div>
-                                
-                                <!-- SEZIONE PAGAMENTO -->
-                                <?php if (empty($b->receipt_url)): ?>
-                                    <div class="paguro-section paguro-section-payment paguro-section-collapsible is-collapsed">
-                                        <h3 class="paguro-section-heading">
-                                            <button type="button" class="paguro-section-toggle" aria-expanded="false">
-                                                <span class="paguro-section-title"><?php echo esc_html($ui['section_payment']); ?></span>
-                                                <span class="paguro-section-icon" aria-hidden="true"></span>
-                                            </button>
-                                        </h3>
-                                        <div class="paguro-section-body">
-                                            <div class="paguro-bank-info">
-                                                <div class="bank-item">
-                                                    <label><?php echo esc_html($ui['label_owner']); ?></label>
-                                                    <strong><?php echo esc_html($ph['intestatario']); ?></strong>
+                                <div class="paguro-custom-content">
+                                    <?php echo wp_kses_post(paguro_parse_template($template_to_use, $ph_public)); ?>
+                                </div>
+
+                                <div class="paguro-alert paguro-alert-info" style="margin-top:15px; margin-bottom:20px;">
+                                    <?php echo esc_html($ui['summary_email_notice']); ?>
+                                </div>
+                                <p style="margin-bottom:20px;">
+                                    <?php echo esc_html($ui['secure_area_intro']); ?>
+                                </p>
+                                <button type="button" id="paguro-show-secure-area" data-target="paguro-secure-area" class="paguro-btn paguro-btn-primary" style="margin-bottom:20px;">
+                                    <?php echo esc_html($ui['secure_area_cta']); ?>
+                                </button>
+
+                                <div id="paguro-secure-area" style="display:none;">
+                                    <?php if (empty($b->receipt_url)): ?>
+                                        <div class="paguro-section paguro-section-payment paguro-section-collapsible is-collapsed">
+                                            <h3 class="paguro-section-heading">
+                                                <button type="button" class="paguro-section-toggle" aria-expanded="false">
+                                                    <span class="paguro-section-title"><?php echo esc_html($ui['section_payment']); ?></span>
+                                                    <span class="paguro-section-icon" aria-hidden="true"></span>
+                                                </button>
+                                            </h3>
+                                            <div class="paguro-section-body">
+                                                <div class="paguro-bank-info">
+                                                    <div class="bank-item">
+                                                        <label><?php echo esc_html($ui['label_owner']); ?></label>
+                                                        <strong><?php echo esc_html($ph['intestatario']); ?></strong>
+                                                    </div>
+                                                    <div class="bank-item">
+                                                        <label><?php echo esc_html($ui['label_iban']); ?></label>
+                                                        <code><?php echo esc_html($ph['iban']); ?></code>
+                                                    </div>
+                                                    <div class="bank-item">
+                                                        <label><?php echo esc_html($ui['label_amount']); ?></label>
+                                                        <strong>€ <?php echo number_format($deposit, 0, ',', '.'); ?></strong>
+                                                    </div>
                                                 </div>
-                                                <div class="bank-item">
-                                                    <label><?php echo esc_html($ui['label_iban']); ?></label>
-                                                    <code><?php echo esc_html($ph['iban']); ?></code>
-                                                </div>
-                                                <div class="bank-item">
-                                                    <label><?php echo esc_html($ui['label_amount']); ?></label>
-                                                    <strong>€ <?php echo number_format($deposit, 0, ',', '.'); ?></strong>
-                                                </div>
-                                            </div>
-                                            
-                                            <div class="paguro-custom-content">
-                                                <?php
-                                                $summary_tpl = get_option('paguro_msg_ui_summary_page', '<div>...</div>');
-                                                $summary_confirm_tpl = get_option('paguro_msg_ui_summary_confirm_page', '');
-                                                if ($summary_confirm_tpl === '') {
-                                                    $summary_confirm_tpl = '<p><strong>Prenotazione confermata.</strong></p>' .
-                                                        '<p>{apt_name} | {date_start} - {date_end}</p>' .
-                                                        '<p>Di seguito i dettagli di pagamento e la distinta (se presente).</p>';
-                                                }
-                                                $template_to_use = ($is_confirmed && !empty($summary_confirm_tpl)) ? $summary_confirm_tpl : $summary_tpl;
-                                                echo wp_kses_post(paguro_parse_template($template_to_use, $ph));
-                                                ?>
                                             </div>
                                         </div>
-                                    </div>
-                                    
-                                    <!-- SEZIONE UPLOAD -->
-                                    <div class="paguro-section paguro-section-upload paguro-section-collapsible is-collapsed">
-                                        <h3 class="paguro-section-heading">
-                                            <button type="button" class="paguro-section-toggle" aria-expanded="false">
-                                                <span class="paguro-section-title"><?php echo esc_html($ui['section_upload']); ?></span>
-                                                <span class="paguro-section-icon" aria-hidden="true"></span>
-                                            </button>
-                                        </h3>
-                                        <div class="paguro-section-body">
-                                            <p class="paguro-upload-instruction">
-                                                <?php echo esc_html(get_option('paguro_msg_ui_upload_instruction', 'Carica la distinta per bloccare le date.')); ?>
-                                            </p>
-                                            
-                                            <label id="paguro-upload-area" class="paguro-upload-drop-zone" for="paguro-file-input">
-                                                <div class="upload-icon">📁</div>
-                                                <p class="upload-text"><?php echo esc_html($ui['upload_drop']); ?></p>
-                                                <input type="file" id="paguro-file-input" style="display:none;" accept=".pdf,.jpg,.jpeg,.png,.gif">
-                                            </label>
-                                            
-                                            <div id="paguro-upload-status" class="paguro-upload-status"></div>
-                                            
-                                            <div id="paguro-upload-success-container" class="paguro-alert paguro-alert-success" style="display:none; margin-top:20px;">
-                                                <h4><?php echo esc_html($ui['upload_success_title']); ?></h4>
-                                                <p><?php echo esc_html($ui['upload_success_text']); ?></p>
-                                                <div id="paguro-view-link"></div>
+
+                                        <div class="paguro-section paguro-section-upload paguro-section-collapsible is-collapsed">
+                                            <h3 class="paguro-section-heading">
+                                                <button type="button" class="paguro-section-toggle" aria-expanded="false">
+                                                    <span class="paguro-section-title"><?php echo esc_html($ui['section_upload']); ?></span>
+                                                    <span class="paguro-section-icon" aria-hidden="true"></span>
+                                                </button>
+                                            </h3>
+                                            <div class="paguro-section-body">
+                                                <p class="paguro-upload-instruction">
+                                                    <?php echo esc_html(get_option('paguro_msg_ui_upload_instruction', 'Carica la distinta per bloccare le date.')); ?>
+                                                </p>
+
+                                                <label id="paguro-upload-area" class="paguro-upload-drop-zone" for="paguro-file-input">
+                                                    <div class="upload-icon">📁</div>
+                                                    <p class="upload-text"><?php echo esc_html($ui['upload_drop']); ?></p>
+                                                    <input type="file" id="paguro-file-input" style="display:none;" accept=".pdf,.jpg,.jpeg,.png,.gif">
+                                                </label>
+
+                                                <div id="paguro-upload-status" class="paguro-upload-status"></div>
+
+                                                <div id="paguro-upload-success-container" class="paguro-alert paguro-alert-success" style="display:none; margin-top:20px;">
+                                                    <h4><?php echo esc_html($ui['upload_success_title']); ?></h4>
+                                                    <p><?php echo esc_html($ui['upload_success_text']); ?></p>
+                                                    <div id="paguro-view-link"></div>
+                                                </div>
+
+                                                <input type="hidden" id="paguro-token" value="<?php echo esc_attr($token); ?>">
                                             </div>
-                                            
-                                            <input type="hidden" id="paguro-token" value="<?php echo esc_attr($token); ?>">
                                         </div>
-                                    </div>
-                                <?php else: ?>
-                                    <div class="paguro-section paguro-section-uploaded paguro-section-collapsible is-collapsed">
-                                        <h3 class="paguro-section-heading">
-                                            <button type="button" class="paguro-section-toggle" aria-expanded="false">
-                                                <span class="paguro-section-title"><?php echo esc_html($ui['section_uploaded']); ?></span>
-                                                <span class="paguro-section-icon" aria-hidden="true"></span>
-                                            </button>
-                                        </h3>
-                                        <div class="paguro-section-body">
-                                            <div class="paguro-alert paguro-alert-info" style="margin-bottom:20px;">
-                                                <?php echo esc_html($ui['receipt_pending']); ?>
+                                    <?php else: ?>
+                                        <div class="paguro-section paguro-section-uploaded paguro-section-collapsible is-collapsed">
+                                            <h3 class="paguro-section-heading">
+                                                <button type="button" class="paguro-section-toggle" aria-expanded="false">
+                                                    <span class="paguro-section-title"><?php echo esc_html($ui['section_uploaded']); ?></span>
+                                                    <span class="paguro-section-icon" aria-hidden="true"></span>
+                                                </button>
+                                            </h3>
+                                            <div class="paguro-section-body">
+                                                <div class="paguro-alert paguro-alert-info" style="margin-bottom:20px;">
+                                                    <?php echo esc_html($ui['receipt_pending']); ?>
+                                                </div>
+                                                <div class="paguro-alert paguro-alert-success">
+                                                    <?php echo nl2br(esc_html($ui['receipt_uploaded_text'])); ?>
+                                                </div>
+                                                <a href="#" data-receipt-url="<?php echo esc_url($b->receipt_url); ?>" class="paguro-btn paguro-btn-secondary paguro-receipt-link">
+                                                    <?php echo esc_html($ui['receipt_view_cta']); ?>
+                                                </a>
                                             </div>
-                                            <div class="paguro-alert paguro-alert-success">
-                                                <?php echo nl2br(esc_html($ui['receipt_uploaded_text'])); ?>
-                                            </div>
-                                            <a href="#" data-receipt-url="<?php echo esc_url($b->receipt_url); ?>" class="paguro-btn paguro-btn-secondary paguro-receipt-link">
-                                                <?php echo esc_html($ui['receipt_view_cta']); ?>
-                                            </a>
                                         </div>
-                                    </div>
-                                <?php endif; ?>
+                                    <?php endif; ?>
+                                </div>
 
                                 <?php if ($is_confirmed && $can_cancel && !$is_cancel_requested): ?>
                                     <div class="paguro-section paguro-section-actions">
@@ -688,5 +764,3 @@ function paguro_shortcode_summary_quote() {
 }
 
 add_shortcode('paguro_summary_quote', 'paguro_shortcode_summary_quote');
-
-?>

@@ -52,5 +52,3 @@ add_shortcode('paguro_chat', 'paguro_shortcode_chat');
 
 // Flag per evitare rendering multiplo del widget globale
 if (!defined('PAGURO_CHAT_DEFINED')) define('PAGURO_CHAT_DEFINED', true);
-
-?>

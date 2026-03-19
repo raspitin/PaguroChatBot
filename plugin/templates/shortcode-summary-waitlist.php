@@ -207,5 +207,3 @@ function paguro_shortcode_summary_waitlist() {
 }
 
 add_shortcode('paguro_summary_waitlist', 'paguro_shortcode_summary_waitlist');
-
-?>

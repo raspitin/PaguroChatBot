@@ -91,14 +91,53 @@
     cursor: pointer;
 }
 
+.paguro-overlay.is-locked .paguro-overlay-close {
+    display: none;
+}
+
 .paguro-overlay-content {
     padding-top: 8px;
+}
+
+.paguro-overlay.is-loading .paguro-overlay-card {
+    width: min(90vw, 520px);
+    max-height: none;
+}
+
+.paguro-overlay.is-loading .paguro-overlay-content {
+    padding-top: 0;
+}
+
+.paguro-overlay.is-loading .paguro-overlay-actions {
+    display: none;
 }
 
 .paguro-overlay-message {
     font-size: 15px;
     color: #333;
     line-height: 1.5;
+}
+
+.paguro-overlay-loading {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.paguro-overlay-spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid #d9e5ec;
+    border-top-color: #0073aa;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    animation: paguro-overlay-spin 0.9s linear infinite;
+}
+
+@keyframes paguro-overlay-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .paguro-overlay-message--error {

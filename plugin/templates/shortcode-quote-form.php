@@ -127,5 +127,3 @@ function paguro_shortcode_quote_form() {
 }
 
 add_shortcode('paguro_quote_form', 'paguro_shortcode_quote_form');
-
-?>
