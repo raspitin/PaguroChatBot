@@ -1,0 +1,12 @@
+# Normalizza i fine riga a LF nel repository (evita diff rumorosi CRLF/LF)
+* text=auto eol=lf
+
+# Binari
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
