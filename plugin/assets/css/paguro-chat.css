@@ -527,6 +527,16 @@
     font-size: 11px;
 }
 
+.paguro-friend-link {
+    color: #0a5ea8;
+    text-decoration: underline;
+    font-size: 12px;
+}
+
+.paguro-friend-link:hover {
+    color: #084b86;
+}
+
 .paguro-social-pressure {
     color: #d35400;
     font-size: 12px;

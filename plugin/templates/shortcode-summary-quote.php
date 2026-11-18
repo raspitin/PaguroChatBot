@@ -182,6 +182,9 @@ function paguro_shortcode_summary_quote() {
                                         '<p>Riceverai una email con il riepilogo del preventivo e le istruzioni per accedere all\'area personale.</p>';
                                 }
                                 $group_template_to_use = ($all_confirmed && !empty($group_summary_confirm_tpl)) ? $group_summary_confirm_tpl : $group_summary_tpl;
+                                if (function_exists('paguro_dedupe_discount_placeholders_in_template')) {
+                                    $group_template_to_use = paguro_dedupe_discount_placeholders_in_template($group_template_to_use);
+                                }
                                 $group_ph = function_exists('paguro_get_group_email_placeholders') ? paguro_get_group_email_placeholders($token) : [];
                                 if (empty($group_ph)) {
                                     $group_ph = [
@@ -461,8 +464,7 @@ function paguro_shortcode_summary_quote() {
                             $deposit = ceil($total_cost * $deposit_percent);
                             $remaining = $total_cost - $deposit;
                             $manual_discount = isset($b->manual_discount) ? max(0, floatval($b->manual_discount)) : 0;
-                            // Se lo sconto è inserito manualmente, azzera il campo "discount" automatico per evitare doppia stampa
-                            $discount_amount = ($manual_discount > 0) ? 0 : $manual_discount;
+                            $discount_amount = $manual_discount;
                             $is_confirmed = ($b->status == 1);
                             $is_cancel_requested = ($b->status == 5);
                             $can_cancel = current_time('timestamp') <= $cancel_deadline_dt->getTimestamp();
@@ -523,6 +525,9 @@ function paguro_shortcode_summary_quote() {
                                     '<p>Riceverai una email con il riepilogo del preventivo e le istruzioni per accedere all\'area personale.</p>';
                             }
                             $template_to_use = ($is_confirmed && !empty($summary_confirm_tpl)) ? $summary_confirm_tpl : $summary_tpl;
+                            if (function_exists('paguro_dedupe_discount_placeholders_in_template')) {
+                                $template_to_use = paguro_dedupe_discount_placeholders_in_template($template_to_use);
+                            }
                             $ph_public = $ph;
                             foreach (['iban', 'intestatario', 'receipt_url', 'receipt_uploaded_at', 'receipt_uploaded_at_fmt'] as $sensitive_key) {
                                 if (isset($ph_public[$sensitive_key])) {

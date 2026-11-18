@@ -299,13 +299,28 @@ function paguro_calculate_group_totals($group_id, $bookings = null) {
             $season_counts[$season]++;
         }
     }
-    foreach (['B', 'M', 'A'] as $s) {
-        if ($season_counts[$s] >= 2) {
-            $discount += paguro_get_group_discount_for_count($season_counts[$s], $s);
+
+    // Nuova regola: per gruppi con stagioni miste usa lo sconto migliore
+    // tra le stagioni coinvolte sul totale settimane del gruppo.
+    if ($weeks_count >= 2) {
+        $active_seasons = [];
+        foreach (['B', 'M', 'A'] as $s) {
+            if (!empty($season_counts[$s])) {
+                $active_seasons[] = $s;
+            }
         }
-    }
-    if ($season_counts['default'] >= 2) {
-        $discount += paguro_get_group_discount_for_count($season_counts['default']);
+
+        if (count($active_seasons) === 1 && intval($season_counts['default']) === 0) {
+            $discount = paguro_get_group_discount_for_count($weeks_count, $active_seasons[0]);
+        } else {
+            $candidates = [];
+            foreach ($active_seasons as $s) {
+                $candidates[] = paguro_get_group_discount_for_count($weeks_count, $s);
+            }
+            // Fallback globale quando la combinazione stagionale non è mappata.
+            $candidates[] = paguro_get_group_discount_for_count($weeks_count);
+            $discount = !empty($candidates) ? max(array_map('floatval', $candidates)) : 0;
+        }
     }
     $total_final = max(0, $total_raw - $discount);
     $deposit_percent = intval(get_option('paguro_deposit_percent', 30));

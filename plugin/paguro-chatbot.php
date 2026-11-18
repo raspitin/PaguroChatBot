@@ -1,12 +1,12 @@
 <?php
 
 /**
- * PAGURO CHATBOT PLUGIN - v3.4.22
+ * PAGURO CHATBOT PLUGIN - v3.4.24
  * Refactored Architecture with Security & Performance Improvements
  * 
  * Plugin Name: Paguro ChatBot
- * Description: Versione 3.4.22 - overlay submit form con messaggio di cortesia prima del riepilogo
- * Version: 3.4.22
+ * Description: Versione 3.4.24 - hardening export CSV e cleanup flussi legacy
+ * Version: 3.4.24
  * Author: Dev Team
  * 
  * IMPROVEMENTS v3.4.0:
@@ -26,7 +26,7 @@ if (!defined('ABSPATH')) exit;
 
 define('PAGURO_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('PAGURO_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('PAGURO_VERSION', '3.4.22');
+define('PAGURO_VERSION', '3.4.24');
 
 // =========================================================
 // IBAN HELPERS
@@ -76,6 +76,7 @@ if (!defined('PAGURO_DEFAULT_DEPOSIT_PERCENT')) define('PAGURO_DEFAULT_DEPOSIT_P
 require_once PAGURO_PLUGIN_DIR . 'includes/functions-availability.php';
 require_once PAGURO_PLUGIN_DIR . 'includes/functions-email.php';
 require_once PAGURO_PLUGIN_DIR . 'includes/functions-analytics.php';
+require_once PAGURO_PLUGIN_DIR . 'includes/functions-admin-export.php';
 require_once PAGURO_PLUGIN_DIR . 'templates/shortcode-chat.php';
 require_once PAGURO_PLUGIN_DIR . 'templates/shortcode-quote-form.php';
 require_once PAGURO_PLUGIN_DIR . 'templates/shortcode-waitlist-form.php';
@@ -269,6 +270,7 @@ function paguro_set_defaults()
     add_option('paguro_mail_from_name', 'Villa Celi');
     add_option('paguro_chat_page_slug', 'chatbot');
     add_option('paguro_chat_page_title', 'Chatbot');
+    add_option('paguro_friend_structure_url', '');
 
     add_option('paguro_msg_ui_social_pressure', 'Altre {count} richieste attive per queste date.');
 
@@ -1279,6 +1281,11 @@ function paguro_handle_chat()
             }
             $found = false;
             $txt_quote = get_option('paguro_js_btn_book', '[Richiedi solo questa settimana]');
+            $friend_structure_url = trim((string) get_option('paguro_friend_structure_url', ''));
+            $friend_structure_html = '';
+            if ($friend_structure_url !== '') {
+                $friend_structure_html = " <a href='" . esc_url($friend_structure_url) . "' class='paguro-friend-link'><strong>Disponibile presso un'altra struttura</strong></a>";
+            }
             $get_observers = function ($apt_id, $date_end, $date_start) use ($wpdb) {
                 return (int) $wpdb->get_var($wpdb->prepare(
                     "SELECT COUNT(DISTINCT guest_email) FROM {$wpdb->prefix}paguro_availability
@@ -1326,17 +1333,15 @@ function paguro_handle_chat()
                     }
 
                     if ($hard_match) {
-                        if ((int) $hard_match->status === 1) {
-                            continue;
-                        }
-                        // OCCUPIED - Show waitlist button
+                        // NOT AVAILABLE - show line with external alternative link (if configured)
                         $d_in = $dt->format('d/m/Y');
                         $d_out = $end->format('d/m/Y');
                         $count++;
                         if ($count <= $offset) continue;
                         if ($shown < $limit) {
+                            $hard_status = intval($hard_match->status);
                             $status_label = 'Non disponibile';
-                            if ((int) $hard_match->status === 5) {
+                            if ($hard_status === 5) {
                                 $status_label = 'Presto nuovamente disponibile';
                             }
                             $viewers = $get_observers($apt->id, $end->format('Y-m-d'), $dt->format('Y-m-d'));
@@ -1345,12 +1350,15 @@ function paguro_handle_chat()
                             $apt_attr = esc_attr(strtolower($apt->name));
                             $d_in_attr = esc_attr($d_in);
                             $d_out_attr = esc_attr($d_out);
-                            $show_waitlist = in_array((int) $hard_match->status, [2, 5], true);
+                            $show_waitlist = in_array($hard_status, [2, 5], true);
                             $date_html = "<span style='color:#777;text-decoration:line-through'>{$dt->format('d/m')} - {$end->format('d/m')}</span>";
                             $waitlist_html = $show_waitlist ? " <a href='#' class='paguro-waitlist-btn' data-apt='{$apt_attr}' data-in='{$d_in_attr}' data-out='{$d_out_attr}'>[Avvisami se si libera]</a>" : "";
-                            $html .= "- <span class='paguro-availability-line'>{$date_html} <span class='paguro-availability-status'>" . esc_html($status_label) . "</span>{$waitlist_html}{$social}</span><br>";
+                            $html .= "- <span class='paguro-availability-line'>{$date_html} <span class='paguro-availability-status'>" . esc_html($status_label) . "</span>{$friend_structure_html}{$waitlist_html}{$social}</span><br>";
                             $shown++;
                             $found = true;
+                        } else {
+                            $html .= "<a href='#' class='paguro-load-more' data-apt='" . esc_attr($apt->id) . "' data-offset='" . esc_attr($offset + $limit) . "' data-month='" . esc_attr($target_month) . "'>...altre</a><br>";
+                            break;
                         }
                     } else {
                         // AVAILABLE - Show book button
@@ -1445,7 +1453,7 @@ function paguro_handle_start_waitlist()
     $page_path = sanitize_text_field(wp_unslash($_POST['page_path'] ?? ''));
     $page_type = sanitize_key(wp_unslash($_POST['page_type'] ?? ''));
     $apt_name = sanitize_text_field(wp_unslash($_POST['apt_name'] ?? ''));
-    $apt_id = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$wpdb->prefix}paguro_apartments WHERE name LIKE %s", $apt_name));
+    $apt_id = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$wpdb->prefix}paguro_apartments WHERE LOWER(name) = LOWER(%s) LIMIT 1", $apt_name));
     $in_raw = sanitize_text_field(wp_unslash($_POST['date_in'] ?? ''));
     $out_raw = sanitize_text_field(wp_unslash($_POST['date_out'] ?? ''));
     $d_in_obj = DateTime::createFromFormat('d/m/Y', $in_raw);
@@ -1521,7 +1529,7 @@ function paguro_handle_lock()
     $page_path = sanitize_text_field(wp_unslash($_POST['page_path'] ?? ''));
     $page_type = sanitize_key(wp_unslash($_POST['page_type'] ?? ''));
     $apt_name = sanitize_text_field(wp_unslash($_POST['apt_name'] ?? ''));
-    $apt_id = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$wpdb->prefix}paguro_apartments WHERE name LIKE %s", $apt_name));
+    $apt_id = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$wpdb->prefix}paguro_apartments WHERE LOWER(name) = LOWER(%s) LIMIT 1", $apt_name));
     $in_raw = sanitize_text_field(wp_unslash($_POST['date_in'] ?? ''));
     $out_raw = sanitize_text_field(wp_unslash($_POST['date_out'] ?? ''));
     $d_in_obj = DateTime::createFromFormat('d/m/Y', $in_raw);
@@ -1646,7 +1654,7 @@ function paguro_handle_lock_multi()
     $page_path = sanitize_text_field(wp_unslash($_POST['page_path'] ?? ''));
     $page_type = sanitize_key(wp_unslash($_POST['page_type'] ?? ''));
     $apt_name = sanitize_text_field(wp_unslash($_POST['apt_name'] ?? ''));
-    $apt_id = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$wpdb->prefix}paguro_apartments WHERE name LIKE %s", $apt_name));
+    $apt_id = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$wpdb->prefix}paguro_apartments WHERE LOWER(name) = LOWER(%s) LIMIT 1", $apt_name));
     $dates_raw = wp_unslash($_POST['dates'] ?? '');
     $dates = json_decode($dates_raw, true);
 
@@ -2320,17 +2328,87 @@ function paguro_summary_render()
 // RENDER INTERFACE (Chat Widget)
 // =========================================================
 
-function paguro_render_interface($mode = 'widget')
+function paguro_resolve_shortcode_apartment_filter($atts = [])
+{
+    global $wpdb;
+
+    $atts = shortcode_atts([
+        'apt_id' => '',
+        'id' => '',
+        'apt_name' => '',
+        'name' => '',
+        'apt_slug' => '',
+        'slug' => '',
+    ], $atts, 'paguro_chat');
+
+    $table_apt = $wpdb->prefix . 'paguro_apartments';
+    $apt_id = intval($atts['apt_id']);
+    if ($apt_id <= 0) {
+        $apt_id = intval($atts['id']);
+    }
+
+    if ($apt_id > 0) {
+        $apt = $wpdb->get_row($wpdb->prepare("SELECT id, name FROM {$table_apt} WHERE id = %d", $apt_id));
+        if ($apt) {
+            return [
+                'id' => intval($apt->id),
+                'name' => (string) $apt->name,
+            ];
+        }
+    }
+
+    $apt_name = sanitize_text_field((string) ($atts['apt_name'] !== '' ? $atts['apt_name'] : $atts['name']));
+    if ($apt_name !== '') {
+        $apt = $wpdb->get_row($wpdb->prepare("SELECT id, name FROM {$table_apt} WHERE LOWER(name) = LOWER(%s) LIMIT 1", $apt_name));
+        if (!$apt) {
+            // Match parziale accettato solo se univoco: evita che "Mare" agganci
+            // per errore "Mare Blu" quando esistono più appartamenti simili.
+            $apt_like = '%' . $wpdb->esc_like($apt_name) . '%';
+            $apt_candidates = $wpdb->get_results($wpdb->prepare("SELECT id, name FROM {$table_apt} WHERE name LIKE %s ORDER BY id ASC LIMIT 2", $apt_like));
+            $apt = (is_array($apt_candidates) && count($apt_candidates) === 1) ? $apt_candidates[0] : null;
+        }
+        if ($apt) {
+            return [
+                'id' => intval($apt->id),
+                'name' => (string) $apt->name,
+            ];
+        }
+    }
+
+    $apt_slug = sanitize_title((string) ($atts['apt_slug'] !== '' ? $atts['apt_slug'] : $atts['slug']));
+    if ($apt_slug !== '') {
+        $apts = $wpdb->get_results("SELECT id, name FROM {$table_apt}");
+        foreach ($apts as $apt) {
+            if (sanitize_title((string) $apt->name) === $apt_slug) {
+                return [
+                    'id' => intval($apt->id),
+                    'name' => (string) $apt->name,
+                ];
+            }
+        }
+    }
+
+    return ['id' => 0, 'name' => ''];
+}
+
+function paguro_render_interface($mode = 'widget', $args = [])
 {
     $icon_url = plugin_dir_url(__FILE__) . 'paguro_bot_icon.png';
     $cls = ($mode === 'inline') ? 'paguro-mode-inline' : 'paguro-mode-widget';
+    $args = is_array($args) ? $args : [];
+    $default_apt_id = max(0, intval($args['apt_id'] ?? 0));
+    $default_apt_name = sanitize_text_field((string) ($args['apt_name'] ?? ''));
+    $welcome_intro = 'Ciao! Sono Paguro 🦀';
+    if ($default_apt_name !== '') {
+        $welcome_intro = "Ciao! Sono Paguro 🦀<br>Chat dedicata al solo appartamento <strong>" . esc_html($default_apt_name) . "</strong>.";
+    }
 
     ob_start(); ?>
-    <div class="paguro-chat-root <?php echo esc_attr($cls); ?>">
+    <div class="paguro-chat-root <?php echo esc_attr($cls); ?>" data-default-apt-id="<?php echo esc_attr($default_apt_id); ?>">
         <div class="paguro-chat-launcher">
             <img src="<?php echo esc_url($icon_url); ?>" alt="Paguro Bot">
         </div>
-        <div class="paguro-chat-window">
+        <div class="paguro-chat-window" data-default-apt-id="<?php echo esc_attr($default_apt_id); ?>">
             <div class="paguro-chat-header">
                 <span>Paguro</span>
                 <span class="close-btn">&times;</span>
@@ -2339,7 +2417,7 @@ function paguro_render_interface($mode = 'widget')
                 <div class="paguro-msg paguro-msg-bot">
                     <img src="<?php echo esc_url($icon_url); ?>" class="paguro-bot-avatar" alt="Paguro">
                     <div class="paguro-msg-content">
-                        Ciao! Sono Paguro 🦀<br>Chiedimi disponibilità per i mesi estivi (es. "Agosto").<br>
+                        <?php echo wp_kses_post($welcome_intro); ?><br>Chiedimi disponibilità per i mesi estivi (es. "Agosto").<br>
                         <div class="paguro-month-buttons">
                             <button class="paguro-quick-btn" data-msg="Disponibilità Giugno">📅 Giugno</button>
                             <button class="paguro-quick-btn" data-msg="Disponibilità Luglio">📅 Luglio</button>
@@ -2358,10 +2436,19 @@ function paguro_render_interface($mode = 'widget')
 <?php return ob_get_clean();
 }
 
-add_shortcode('paguro_chat', function () {
+function paguro_render_chat_shortcode($atts = [], $content = null, $tag = 'paguro_chat')
+{
     if (!defined('PAGURO_WIDGET_RENDERED')) define('PAGURO_WIDGET_RENDERED', true);
-    return paguro_render_interface('inline');
-});
+    $apt = paguro_resolve_shortcode_apartment_filter((array) $atts);
+    return paguro_render_interface('inline', [
+        'apt_id' => $apt['id'] ?? 0,
+        'apt_name' => $apt['name'] ?? '',
+    ]);
+}
+
+add_shortcode('paguro_chat', 'paguro_render_chat_shortcode');
+add_shortcode('paguro_chat_apartment', 'paguro_render_chat_shortcode');
+add_shortcode('paguro_chat_apt', 'paguro_render_chat_shortcode');
 
 add_action('wp_footer', function () {
     if (!defined('PAGURO_WIDGET_RENDERED') && get_option('paguro_global_active', 1)) {

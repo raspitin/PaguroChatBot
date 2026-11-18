@@ -4,7 +4,7 @@
  * Paguro ChatBot - Admin Dashboard
  * Gestione prenotazioni, configurazione, email templates
  * 
- * @version 3.4.22
+ * @version 3.4.24
  */
 
 if (!defined('ABSPATH')) exit;
@@ -31,6 +31,7 @@ if (!function_exists('paguro_quote_sent_from_admin')) {
         foreach ($history as $entry) {
             $action = isset($entry['action']) ? (string) $entry['action'] : '';
             $details = isset($entry['details']) ? strtolower((string) $entry['details']) : '';
+            if ($action === 'QUOTE_REQ' || $action === 'GROUP_QUOTE_UPDATE') return true;
             if ($action === 'ADMIN_SEND_QUOTE') return true;
             if ($action === 'ADMIN_RESEND_EMAIL' && strpos($details, 'preventivo') !== false) return true;
         }
@@ -94,71 +95,8 @@ if (!function_exists('paguro_finance_distribute_amount')) {
     }
 }
 
-if (!function_exists('paguro_get_booking_status_label_for_export')) {
-    function paguro_get_booking_status_label_for_export($status, $receipt_url = '')
-    {
-        $status = intval($status);
-        if ($status === 2 && !empty($receipt_url)) {
-            return 'Distinta (in validazione)';
-        }
-
-        $labels = [
-            1 => 'Confermata',
-            2 => 'Preventivo',
-            3 => 'Cancellata',
-            4 => 'Waitlist',
-            5 => 'Richiesta cancellazione',
-        ];
-
-        return $labels[$status] ?? 'Sconosciuto';
-    }
-}
-
-if (!function_exists('paguro_get_booking_summary_url')) {
-    function paguro_get_booking_summary_url($booking)
-    {
-        if (!$booking || empty($booking->lock_token)) return '';
-
-        $query_args = ['token' => $booking->lock_token];
-        if (intval($booking->status) === 4) {
-            $query_args['waitlist'] = 1;
-        }
-
-        return add_query_arg(
-            $query_args,
-            site_url('/' . get_option('paguro_page_slug', 'riepilogo-prenotazione') . '/')
-        );
-    }
-}
-
-if (!function_exists('paguro_csv_money_format')) {
-    function paguro_csv_money_format($value)
-    {
-        return number_format((float) $value, 2, ',', '');
-    }
-}
-
-if (!function_exists('paguro_send_csv_download')) {
-    function paguro_send_csv_download($filename, $headers, $rows)
-    {
-        nocache_headers();
-        header('Content-Type: text/csv; charset=utf-8');
-        header('Content-Disposition: attachment; filename="' . sanitize_file_name($filename) . '"');
-
-        $output = fopen('php://output', 'w');
-        if ($output === false) {
-            wp_die(__('Impossibile generare il file CSV.', 'paguro'));
-        }
-
-        fwrite($output, "\xEF\xBB\xBF");
-        fputcsv($output, $headers, ';');
-        foreach ($rows as $row) {
-            fputcsv($output, $row, ';');
-        }
-        fclose($output);
-        exit;
-    }
-}
+// paguro_get_booking_status_label_for_export() e paguro_get_booking_summary_url()
+// sono definite in includes/functions-admin-export.php (sempre caricato).
 
 if (!function_exists('paguro_get_admin_apartment_index')) {
     function paguro_get_admin_apartment_index($table_apt)
@@ -442,128 +380,6 @@ if (!function_exists('paguro_get_finance_print_report')) {
     }
 }
 
-if (isset($_GET['paguro_export'])) {
-    $export_type = sanitize_key(wp_unslash($_GET['paguro_export']));
-    $nonce_ok = isset($_GET['paguro_nonce']) && wp_verify_nonce(wp_unslash($_GET['paguro_nonce']), 'paguro_export_' . $export_type);
-    if (!$nonce_ok) {
-        wp_die(__('Nonce non valido per export CSV.', 'paguro'));
-    }
-
-    $apt_rows_export = $wpdb->get_results("SELECT id, name, apt_url FROM $table_apt ORDER BY name ASC");
-    $apt_map_export = [];
-    foreach ($apt_rows_export as $apt_row_export) {
-        $apt_map_export[intval($apt_row_export->id)] = [
-            'name' => $apt_row_export->name,
-            'url' => $apt_row_export->apt_url,
-        ];
-    }
-
-    if ($export_type === 'active_bookings') {
-        $bookings_export = $wpdb->get_results(
-            "SELECT * FROM {$wpdb->prefix}paguro_availability WHERE status <> 3 ORDER BY created_at DESC, id DESC"
-        );
-        $rows = [];
-        foreach ($bookings_export as $booking_export) {
-            $apt_export = $apt_map_export[intval($booking_export->apartment_id)] ?? ['name' => '', 'url' => ''];
-            $rows[] = [
-                intval($booking_export->id),
-                (string) ($booking_export->group_id ?? ''),
-                isset($booking_export->group_seq) ? intval($booking_export->group_seq) : '',
-                (string) ($booking_export->guest_name ?? ''),
-                (string) ($booking_export->guest_email ?? ''),
-                (string) ($booking_export->guest_phone ?? ''),
-                (string) ($apt_export['name'] ?? ''),
-                (string) paguro_get_apartment_public_url($booking_export->apartment_id ?? 0, $apt_export['url'] ?? ''),
-                (string) ($booking_export->date_start ?? ''),
-                (string) ($booking_export->date_end ?? ''),
-                paguro_get_booking_status_label_for_export($booking_export->status ?? 0, $booking_export->receipt_url ?? ''),
-                !empty($booking_export->receipt_url) ? 'Si' : 'No',
-                (string) ($booking_export->receipt_url ?? ''),
-                isset($booking_export->manual_price) ? paguro_csv_money_format($booking_export->manual_price) : '',
-                isset($booking_export->manual_discount) ? paguro_csv_money_format($booking_export->manual_discount) : '',
-                (string) ($booking_export->created_at ?? ''),
-                (string) ($booking_export->lock_expires ?? ''),
-                (string) ($booking_export->lock_token ?? ''),
-                paguro_get_booking_summary_url($booking_export),
-            ];
-        }
-
-        paguro_send_csv_download(
-            'paguro-prenotazioni-attive-' . date('Y-m-d') . '.csv',
-            ['ID', 'Gruppo', 'Sequenza gruppo', 'Guest', 'Email', 'Telefono', 'Appartamento', 'Link appartamento', 'Arrivo', 'Partenza', 'Stato', 'Distinta caricata', 'URL distinta', 'Prezzo manuale', 'Sconto manuale', 'Creata il', 'Scadenza blocco', 'Token', 'Link riepilogo'],
-            $rows
-        );
-    }
-
-    if ($export_type === 'finance') {
-        $season_start_fin = get_option('paguro_season_start', '2026-06-01');
-        $season_end_fin = get_option('paguro_season_end', '2026-09-30');
-        $deposit_percent = intval(get_option('paguro_deposit_percent', 30));
-        $finance_deposit_overrides = get_option('paguro_finance_deposit_overrides', []);
-        if (!is_array($finance_deposit_overrides)) $finance_deposit_overrides = [];
-        $finance_received_overrides = get_option('paguro_finance_received_overrides', []);
-        if (!is_array($finance_received_overrides)) $finance_received_overrides = [];
-
-        $finance_bookings_export = $wpdb->get_results($wpdb->prepare(
-            "SELECT * FROM {$wpdb->prefix}paguro_availability
-             WHERE status = 1 AND date_end >= %s AND date_start <= %s
-             ORDER BY date_start ASC, id ASC",
-            $season_start_fin,
-            $season_end_fin
-        ));
-
-        $rows = [];
-        foreach ($finance_bookings_export as $booking_export) {
-            $apt_export = $apt_map_export[intval($booking_export->apartment_id)] ?? ['name' => '', 'url' => ''];
-            $total_cost = function_exists('paguro_get_booking_total_cost') ? paguro_get_booking_total_cost($booking_export) : 0;
-            $total_cost = max(0, round((float) $total_cost, 2));
-            $booking_key = (string) intval($booking_export->id ?? 0);
-            $deposit = $total_cost > 0 ? ceil($total_cost * ($deposit_percent / 100)) : 0;
-            if (array_key_exists($booking_key, $finance_deposit_overrides)) {
-                $deposit = max(0, round((float) $finance_deposit_overrides[$booking_key], 2));
-            }
-            if ($deposit > $total_cost) $deposit = $total_cost;
-
-            $deposit_received = $deposit;
-            if (array_key_exists($booking_key, $finance_received_overrides)) {
-                $deposit_received = max(0, round((float) $finance_received_overrides[$booking_key], 2));
-            }
-            if ($deposit_received > $total_cost) $deposit_received = $total_cost;
-
-            $remaining = max(0, $total_cost - $deposit_received);
-            $forecast = $remaining;
-            $refund = 0;
-
-            $rows[] = [
-                intval($booking_export->id),
-                (string) ($booking_export->group_id ?? ''),
-                isset($booking_export->group_seq) ? intval($booking_export->group_seq) : '',
-                (string) ($booking_export->guest_name ?? ''),
-                (string) ($booking_export->guest_email ?? ''),
-                (string) ($apt_export['name'] ?? ''),
-                (string) paguro_get_apartment_public_url($booking_export->apartment_id ?? 0, $apt_export['url'] ?? ''),
-                (string) ($booking_export->date_start ?? ''),
-                (string) ($booking_export->date_end ?? ''),
-                paguro_csv_money_format($total_cost),
-                paguro_csv_money_format($deposit),
-                paguro_csv_money_format($deposit_received),
-                paguro_csv_money_format($remaining),
-                paguro_csv_money_format($forecast),
-                paguro_csv_money_format($refund),
-                $season_start_fin,
-                $season_end_fin,
-                paguro_get_booking_summary_url($booking_export),
-            ];
-        }
-
-        paguro_send_csv_download(
-            'paguro-situazione-economica-' . date('Y-m-d') . '.csv',
-            ['ID', 'Gruppo', 'Sequenza gruppo', 'Guest', 'Email', 'Appartamento', 'Link appartamento', 'Arrivo', 'Partenza', 'Totale', 'Acconto', 'Acconto ricevuto', 'Saldo previsto', 'Incasso previsto', 'Rimborso', 'Report da', 'Report a', 'Link riepilogo'],
-            $rows
-        );
-    }
-}
-
 // ====== SALVATAGGIO OPZIONI ======
 if (isset($_POST['paguro_save_opts']) && check_admin_referer('paguro_admin_opts')) {
     update_option('paguro_season_start', sanitize_text_field(wp_unslash($_POST['season_start'] ?? '')));
@@ -578,6 +394,7 @@ if (isset($_POST['paguro_save_opts']) && check_admin_referer('paguro_admin_opts'
     update_option('paguro_ai_provider', sanitize_text_field(wp_unslash($_POST['ai_provider'] ?? 'api')));
     update_option('paguro_ollama_url', esc_url_raw(wp_unslash($_POST['ollama_url'] ?? '')));
     update_option('paguro_ollama_model', sanitize_text_field(wp_unslash($_POST['ollama_model'] ?? '')));
+    update_option('paguro_friend_structure_url', esc_url_raw(wp_unslash($_POST['friend_structure_url'] ?? '')));
 
     echo '<div class="notice notice-success is-dismissible"><p><strong>✓</strong> Configurazione Salvata.</p></div>';
 }
@@ -1206,6 +1023,11 @@ if (isset($_POST['paguro_action']) && check_admin_referer('paguro_admin_action')
             $status = intval($booking->status);
             $has_receipt = !empty($booking->receipt_url);
             $failure_reason = '';
+            $admin_resend_note = sanitize_textarea_field(wp_unslash($_POST['admin_resend_note'] ?? ''));
+            $email_extra = [];
+            if ($admin_resend_note !== '') {
+                $email_extra['admin_note'] = $admin_resend_note;
+            }
 
             $history = paguro_get_history($req_id);
             $is_confirmed = false;
@@ -1220,7 +1042,7 @@ if (isset($_POST['paguro_action']) && check_admin_referer('paguro_admin_action')
             }
 
             if ($is_manual_insert) {
-                $sent = paguro_send_quote_request_to_user($req_id);
+                $sent = paguro_send_quote_request_to_user($req_id, $email_extra);
                 $label = 'preventivo';
             } else {
                 if ($status === 3) {
@@ -1245,14 +1067,27 @@ if (isset($_POST['paguro_action']) && check_admin_referer('paguro_admin_action')
                         $sent = paguro_send_receipt_received_to_user($req_id);
                         $label = 'distinta ricevuta';
                     } else {
-                        $sent = paguro_send_quote_request_to_user($req_id);
+                        $sent = paguro_send_quote_request_to_user($req_id, $email_extra);
                         $label = 'preventivo';
                     }
                 }
             }
 
+            $note_suffix = '';
+            if ($admin_resend_note !== '') {
+                $note_preview = $admin_resend_note;
+                if (function_exists('mb_substr')) {
+                    $note_preview = mb_substr($note_preview, 0, 160);
+                    if (mb_strlen($admin_resend_note) > 160) $note_preview .= '...';
+                } else {
+                    $note_preview = substr($note_preview, 0, 160);
+                    if (strlen($admin_resend_note) > 160) $note_preview .= '...';
+                }
+                $note_suffix = ' | nota: ' . $note_preview;
+            }
+
             if ($sent) {
-                paguro_add_history($req_id, 'ADMIN_RESEND_EMAIL', 'Email reinviata da amministratore (' . $label . ')');
+                paguro_add_history($req_id, 'ADMIN_RESEND_EMAIL', 'Email reinviata da amministratore (' . $label . ')' . $note_suffix);
                 echo '<div class="notice notice-success is-dismissible"><p><strong>✓</strong> Email Reinviata (' . esc_html($label) . ').</p></div>';
             } else {
                 if (!empty($booking->group_id) && function_exists('paguro_get_group_bookings')) {
@@ -1280,7 +1115,7 @@ if (isset($_POST['paguro_action']) && check_admin_referer('paguro_admin_action')
                 if ($failure_reason === '') {
                     $failure_reason = 'Invio fallito (wp_mail). Verifica configurazione mail o log server.';
                 }
-                paguro_add_history($req_id, 'ADMIN_RESEND_EMAIL_FAIL', 'Reinvio fallito: ' . $failure_reason);
+                paguro_add_history($req_id, 'ADMIN_RESEND_EMAIL_FAIL', 'Reinvio fallito: ' . $failure_reason . $note_suffix);
                 echo '<div class="notice notice-error"><p>Impossibile reinviare la mail per questo stato. ' . esc_html($failure_reason) . '</p></div>';
             }
         }
@@ -1334,6 +1169,48 @@ if (isset($_POST['paguro_action']) && check_admin_referer('paguro_admin_action')
                         echo '<div class="notice notice-success is-dismissible"><p><strong>✓</strong> Distinta validata per il gruppo.</p></div>';
                     } else {
                         echo '<div class="notice notice-error"><p>Nessuna distinta valida da confermare per il gruppo.</p></div>';
+                    }
+                }
+            }
+        }
+
+        if ($_POST['paguro_action'] === 'delete_group_booking') {
+            $group_id = sanitize_text_field(wp_unslash($_POST['group_id'] ?? ''));
+            if ($group_id === '' || !function_exists('paguro_get_group_bookings')) {
+                echo '<div class="notice notice-error"><p>Gruppo non valido.</p></div>';
+            } else {
+                $group_bookings = paguro_get_group_bookings($group_id);
+                if (!$group_bookings) {
+                    echo '<div class="notice notice-error"><p>Gruppo non trovato.</p></div>';
+                } else {
+                    $moved = 0;
+                    $already_cancelled = 0;
+                    foreach ($group_bookings as $gb) {
+                        $gb_id = intval($gb->id ?? 0);
+                        if ($gb_id <= 0) continue;
+                        if (intval($gb->status) === 3) {
+                            $already_cancelled++;
+                            continue;
+                        }
+                        $updated = $wpdb->update($table_avail, ['status' => 3], ['id' => $gb_id]);
+                        if ($updated !== false) {
+                            paguro_add_history($gb_id, 'ADMIN_SOFT_DELETE', 'Spostata in archivio cancellati da azione gruppo');
+                            $moved++;
+                        }
+                    }
+
+                    if (function_exists('paguro_maybe_update_group_quote_after_cancel')) {
+                        paguro_maybe_update_group_quote_after_cancel($group_id);
+                    }
+
+                    if ($moved > 0) {
+                        $msg = '<div class="notice notice-success is-dismissible"><p><strong>✓</strong> Gruppo spostato in Archivio Cancellati (' . intval($moved) . ' record).</p></div>';
+                        if ($already_cancelled > 0) {
+                            $msg = '<div class="notice notice-success is-dismissible"><p><strong>✓</strong> Gruppo aggiornato: ' . intval($moved) . ' record spostati, ' . intval($already_cancelled) . ' già cancellati.</p></div>';
+                        }
+                        echo $msg;
+                    } else {
+                        echo '<div class="notice notice-warning is-dismissible"><p>Tutti i record del gruppo sono già nell\'archivio cancellati.</p></div>';
                     }
                 }
             }
@@ -1933,6 +1810,69 @@ if (isset($_GET['paguro_print']) && sanitize_key(wp_unslash($_GET['paguro_print'
                 return false;
             }
 
+            function openResendEmailNote(btn) {
+                if (!btn) return false;
+                var form = btn.closest('form');
+                if (!form) return false;
+
+                var content = '' +
+                    '<div style=\"line-height:1.5; margin-bottom:10px;\">' +
+                    '  <strong>Reinvio email cliente</strong><br>' +
+                    '  Puoi aggiungere una nota contestuale da includere nel messaggio. Se lasci vuoto, la mail viene inviata senza nota.' +
+                    '</div>' +
+                    '<label for=\"paguro-resend-note\" style=\"display:block; margin-bottom:6px; font-weight:600;\">Nota per il cliente (opzionale)</label>' +
+                    '<textarea id=\"paguro-resend-note\" rows=\"5\" style=\"width:100%; min-width:320px; max-width:720px;\" placeholder=\"Es. Ti inoltriamo il preventivo aggiornato con lo sconto corretto.\"></textarea>';
+                var actions = '' +
+                    '<button type=\"button\" class=\"button paguro-admin-overlay-cancel\">Annulla</button>' +
+                    '<button type=\"button\" class=\"button\" id=\"paguro-resend-submit-empty\">Invia senza nota</button>' +
+                    '<button type=\"button\" class=\"button button-primary\" id=\"paguro-resend-submit-note\">Reinvia con nota</button>';
+                openOverlay(content, actions);
+
+                var noteInput = document.getElementById('paguro-resend-note');
+                if (noteInput) noteInput.focus();
+
+                var submitResend = function(noteText) {
+                    var noteField = form.querySelector('input[name=\"admin_resend_note\"]');
+                    if (!noteField) {
+                        noteField = document.createElement('input');
+                        noteField.type = 'hidden';
+                        noteField.name = 'admin_resend_note';
+                        form.appendChild(noteField);
+                    }
+                    noteField.value = noteText || '';
+
+                    var actionName = btn.getAttribute('name');
+                    var actionValue = btn.getAttribute('value');
+                    if (actionName) {
+                        var actionField = form.querySelector('input[name=\"' + actionName + '\"]');
+                        if (!actionField || actionField.type !== 'hidden') {
+                            actionField = document.createElement('input');
+                            actionField.type = 'hidden';
+                            actionField.name = actionName;
+                            form.appendChild(actionField);
+                        }
+                        actionField.value = actionValue || '';
+                    }
+
+                    closeOverlay();
+                    form.submit();
+                };
+
+                var sendEmptyBtn = document.getElementById('paguro-resend-submit-empty');
+                var sendNoteBtn = document.getElementById('paguro-resend-submit-note');
+                if (sendEmptyBtn) {
+                    sendEmptyBtn.onclick = function() {
+                        submitResend('');
+                    };
+                }
+                if (sendNoteBtn) {
+                    sendNoteBtn.onclick = function() {
+                        submitResend(noteInput ? noteInput.value : '');
+                    };
+                }
+                return false;
+            }
+
             window.paguroAdminShowLog = showHistoryLog;
             window.paguroAdminShowReceipt = showReceipt;
             window.paguroAdminEditBooking = openEditBooking;
@@ -1969,6 +1909,13 @@ if (isset($_GET['paguro_print']) && sanitize_key(wp_unslash($_GET['paguro_print'
                 if (extendBtn) {
                     e.preventDefault();
                     openExtendExpiry(extendBtn);
+                    return;
+                }
+
+                var resendBtn = target.closest('.paguro-resend-email');
+                if (resendBtn) {
+                    e.preventDefault();
+                    openResendEmailNote(resendBtn);
                     return;
                 }
 
@@ -2693,12 +2640,24 @@ if (isset($_GET['paguro_print']) && sanitize_key(wp_unslash($_GET['paguro_print'
             </div>
             <?php
             $export_active_url = wp_nonce_url(
-                add_query_arg(['tab' => 'bookings', 'paguro_export' => 'active_bookings'], $base_url),
+                add_query_arg(
+                    [
+                        'action' => 'paguro_export_csv',
+                        'export' => 'active_bookings',
+                    ],
+                    admin_url('admin-post.php')
+                ),
                 'paguro_export_active_bookings',
                 'paguro_nonce'
             );
             $export_finance_url = wp_nonce_url(
-                add_query_arg(['tab' => 'bookings', 'paguro_export' => 'finance'], $base_url),
+                add_query_arg(
+                    [
+                        'action' => 'paguro_export_csv',
+                        'export' => 'finance',
+                    ],
+                    admin_url('admin-post.php')
+                ),
                 'paguro_export_finance',
                 'paguro_nonce'
             );
@@ -2763,19 +2722,26 @@ if (isset($_GET['paguro_print']) && sanitize_key(wp_unslash($_GET['paguro_print'
                     <?php
                     $limit = 50;
                     $where = '';
+                    $exclude_incomplete_clause = " AND NOT (
+                        status = 2
+                        AND receipt_url IS NULL
+                        AND TRIM(COALESCE(guest_name, '')) = ''
+                        AND TRIM(COALESCE(guest_email, '')) = ''
+                    )";
                     if ($filter === 'receipts') {
                         $where = 'WHERE status=2 AND receipt_url IS NOT NULL';
                     } elseif ($filter === 'cancel_requests') {
                         $where = 'WHERE status=5';
                     }
                     if ($where) {
+                        $where .= $exclude_incomplete_clause;
                         $bookings = $wpdb->get_results($wpdb->prepare(
                             "SELECT * FROM {$wpdb->prefix}paguro_availability $where ORDER BY created_at DESC LIMIT %d",
                             $limit
                         ));
                     } else {
                         $bookings = $wpdb->get_results($wpdb->prepare(
-                            "SELECT * FROM {$wpdb->prefix}paguro_availability WHERE status <> 3 ORDER BY created_at DESC LIMIT %d",
+                            "SELECT * FROM {$wpdb->prefix}paguro_availability WHERE status <> 3 {$exclude_incomplete_clause} ORDER BY created_at DESC LIMIT %d",
                             $limit
                         ));
                     }
@@ -2855,6 +2821,12 @@ if (isset($_GET['paguro_print']) && sanitize_key(wp_unslash($_GET['paguro_print'
                                                 <button type="submit" name="paguro_action" value="validate_group_receipt" class="button button-small paguro-admin-confirm" data-confirm="Validare tutte le distinte del gruppo?">Valida Distinta</button>
                                             </form>
                                         <?php } ?>
+                                        <form method="POST" style="display:inline;">
+                                            <?php wp_nonce_field('paguro_admin_action'); ?>
+                                            <input type="hidden" name="booking_id" value="<?php echo esc_attr($first->id); ?>">
+                                            <input type="hidden" name="group_id" value="<?php echo esc_attr($b->group_id); ?>">
+                                            <button type="submit" name="paguro_action" value="delete_group_booking" class="button button-small button-link-delete paguro-admin-confirm" data-confirm="Spostare in archivio cancellati tutte le prenotazioni del gruppo?">Sposta tutto in cancellati</button>
+                                        </form>
                                         <button type="button" class="button button-small paguro-group-toggle" data-group="<?php echo esc_attr($b->group_id); ?>">Dettagli</button>
                                     </td>
                                 </tr>
@@ -2975,7 +2947,11 @@ if (isset($_GET['paguro_print']) && sanitize_key(wp_unslash($_GET['paguro_print'
                                                         <button type="submit" name="paguro_action" value="confirm_booking" class="button button-small paguro-admin-confirm" data-confirm="Confermare manualmente questa prenotazione?">Conferma manualmente</button>
                                                     <?php } ?>
                                                 <?php } ?>
-                                                <button type="submit" name="paguro_action" value="<?php echo esc_attr($email_action); ?>" class="button button-small"><?php echo esc_html($email_label); ?></button>
+                                                <button type="submit"
+                                                    name="paguro_action"
+                                                    value="<?php echo esc_attr($email_action); ?>"
+                                                    class="button button-small<?php echo ($email_action === 'resend_email') ? ' paguro-resend-email' : ''; ?>"
+                                                    data-email-action="<?php echo esc_attr($email_action); ?>"><?php echo esc_html($email_label); ?></button>
                                                 <button type="submit" name="paguro_action" value="anonymize" class="button button-small paguro-admin-confirm" data-confirm="Anonimizzare i dati?">GDPR</button>
                                                 <button type="submit" name="paguro_action" value="delete_booking" class="button button-small button-link-delete paguro-admin-confirm" data-confirm="Spostare in archivio cancellati?">Sposta in cancellati</button>
                                             </form>
@@ -3101,7 +3077,11 @@ if (isset($_GET['paguro_print']) && sanitize_key(wp_unslash($_GET['paguro_print'
                                                 <button type="submit" name="paguro_action" value="confirm_booking" class="button button-small paguro-admin-confirm" data-confirm="Confermare manualmente questa prenotazione?">Conferma manualmente</button>
                                             <?php } ?>
                                         <?php } ?>
-                                        <button type="submit" name="paguro_action" value="<?php echo esc_attr($email_action); ?>" class="button button-small"><?php echo esc_html($email_label); ?></button>
+                                        <button type="submit"
+                                            name="paguro_action"
+                                            value="<?php echo esc_attr($email_action); ?>"
+                                            class="button button-small<?php echo ($email_action === 'resend_email') ? ' paguro-resend-email' : ''; ?>"
+                                            data-email-action="<?php echo esc_attr($email_action); ?>"><?php echo esc_html($email_label); ?></button>
                                         <button type="submit" name="paguro_action" value="anonymize" class="button button-small paguro-admin-confirm" data-confirm="Anonimizzare i dati?">GDPR</button>
                                         <button type="submit" name="paguro_action" value="delete_booking" class="button button-small button-link-delete paguro-admin-confirm" data-confirm="Spostare in archivio cancellati?">Sposta in cancellati</button>
                                     </form>
@@ -3949,6 +3929,7 @@ if (isset($_GET['paguro_print']) && sanitize_key(wp_unslash($_GET['paguro_print'
                         <th>ID</th>
                         <th>Nome</th>
                         <th>Link pagina</th>
+                        <th>Shortcode Chat</th>
                         <th>Prezzo Base (€/settimana)</th>
                         <th width="150">Azioni</th>
                     </tr>
@@ -3966,6 +3947,11 @@ if (isset($_GET['paguro_print']) && sanitize_key(wp_unslash($_GET['paguro_print'
                                 <?php } else { ?>
                                     <span style="color:#999;">—</span>
                                 <?php } ?>
+                            </td>
+                            <td>
+                                <?php $apt_slug = sanitize_title((string) ($apt->name ?? '')); ?>
+                                <code>[paguro_chat apt_slug="<?php echo esc_attr($apt_slug); ?>"]</code><br>
+                                <small>ID fallback: <code>[paguro_chat apt_id="<?php echo esc_attr(intval($apt->id)); ?>"]</code></small>
                             </td>
                             <td>€<?php echo number_format($apt->base_price, 0); ?></td>
                             <td>
@@ -4152,7 +4138,7 @@ if (isset($_GET['paguro_print']) && sanitize_key(wp_unslash($_GET['paguro_print'
                 }
                 ?>
 
-                <p style="color: #666;">Personalizza i modelli email. Variabili disponibili: <code>{guest_name}</code>, <code>{guest_email}</code>, <code>{guest_phone}</code>, <code>{customer_iban}</code>, <code>{customer_iban_priv}</code>, <code>{apt_name}</code>, <code>{apt_link}</code>, <code>{date_start}</code>, <code>{date_end}</code>, <code>{total_cost}</code>, <code>{deposit_cost}</code>, <code>{remaining_cost}</code>, <code>{deposit_percent}</code>, <code>{iban}</code>, <code>{intestatario}</code>, <code>{link_riepilogo}</code>, <code>{cancel_deadline}</code>, <code>{manual_discount}</code>, <code>{manual_discount_fmt}</code>, <code>{manual_discount_raw}</code></p>
+                <p style="color: #666;">Personalizza i modelli email. Variabili disponibili: <code>{guest_name}</code>, <code>{guest_email}</code>, <code>{guest_phone}</code>, <code>{customer_iban}</code>, <code>{customer_iban_priv}</code>, <code>{apt_name}</code>, <code>{apt_link}</code>, <code>{apt_link_html}</code>, <code>{date_start}</code>, <code>{date_end}</code>, <code>{total_cost}</code>, <code>{deposit_cost}</code>, <code>{remaining_cost}</code>, <code>{deposit_percent}</code>, <code>{iban}</code>, <code>{intestatario}</code>, <code>{link_riepilogo}</code>, <code>{cancel_deadline}</code>, <code>{manual_discount}</code>, <code>{manual_discount_fmt}</code>, <code>{manual_discount_raw}</code>, <code>{admin_note}</code>, <code>{admin_note_block}</code></p>
 
                 <form method="POST">
                     <?php wp_nonce_field('paguro_email_opts'); ?>
@@ -5052,6 +5038,7 @@ if (isset($_GET['paguro_print']) && sanitize_key(wp_unslash($_GET['paguro_print'
                             <p class="description">
                                 Formato base: <code>2=50, 3=120, 4=200</code> (default).
                                 Per stagione: <code>A2=300, M2=200, B2=100</code> (A=Alta, M=Media, B=Bassa).
+                                Per settimane con stagioni miste si applica il valore migliore tra le stagioni coinvolte (es. B+M su 2 settimane: <code>max(B2, M2)</code>).
                             </p>
                         </td>
                     </tr>
@@ -5071,6 +5058,13 @@ if (isset($_GET['paguro_print']) && sanitize_key(wp_unslash($_GET['paguro_print'
                         <th>URL API ChatBot</th>
                         <td>
                             <input type="url" name="paguro_api_url" value="<?php echo esc_attr(get_option('paguro_api_url', 'https://api.example.com')); ?>" style="width: 100%; max-width: 400px;">
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>URL Struttura Amica</th>
+                        <td>
+                            <input type="url" name="friend_structure_url" value="<?php echo esc_attr(get_option('paguro_friend_structure_url', '')); ?>" style="width: 100%; max-width: 500px;" placeholder="https://www.example.com/struttura-amica">
+                            <p class="description">Se impostato, nelle date non disponibili il chatbot mostra il link in grassetto: <strong>Disponibile presso un'altra struttura</strong>.</p>
                         </td>
                     </tr>
                     <tr>

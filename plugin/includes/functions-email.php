@@ -152,10 +152,32 @@ if (!function_exists('paguro_get_apartment_public_url')) {
     }
 }
 
+if (!function_exists('paguro_build_apartment_link_placeholder')) {
+    function paguro_build_apartment_link_placeholder($apt_name, $apt_url = '')
+    {
+        $label = trim((string) $apt_name);
+        $url = esc_url((string) $apt_url);
+
+        if ($label === '') {
+            $fallback = preg_replace('#^https?://#i', '', $url);
+            $fallback = rtrim((string) $fallback, '/');
+            $label = $fallback !== '' ? $fallback : 'Appartamento';
+        }
+
+        if ($url === '') {
+            return esc_html($label);
+        }
+
+        return '<a href="' . $url . '" target="_blank" rel="noopener noreferrer">' . esc_html($label) . '</a>';
+    }
+}
+
 function paguro_get_email_placeholders($b) {
     $apt_name_raw = isset($b->apt_name) ? $b->apt_name : '';
     $apt_name = $apt_name_raw ? ucfirst($apt_name_raw) : '';
-    $apt_link = paguro_get_apartment_public_url($b->apartment_id ?? 0, $b->apt_url ?? '');
+    $apt_url = paguro_get_apartment_public_url($b->apartment_id ?? 0, $b->apt_url ?? '');
+    $apt_link = $apt_url;
+    $apt_link_html = paguro_build_apartment_link_placeholder($apt_name, $apt_url);
 
     $page_slug = get_option('paguro_page_slug', 'riepilogo-prenotazione');
     $link_riepilogo = site_url("/{$page_slug}/?token={$b->lock_token}");
@@ -212,7 +234,12 @@ function paguro_get_email_placeholders($b) {
         'customer_iban_priv' => $customer_iban_priv,
         'apt_name' => $apt_name,
         'apt_name_raw' => $apt_name_raw,
+        'apt_url' => $apt_url,
         'apt_link' => $apt_link,
+        'apt_link_html' => $apt_link_html,
+        'admin_note' => '',
+        'admin_note_raw' => '',
+        'admin_note_block' => '',
         'date_start' => date('d/m/Y', strtotime($b->date_start)),
         'date_end' => date('d/m/Y', strtotime($b->date_end)),
         'date_start_raw' => $b->date_start,
@@ -374,7 +401,11 @@ function paguro_get_group_email_placeholders($group_id) {
     $page_slug = get_option('paguro_page_slug', 'riepilogo-prenotazione');
     $link_riepilogo = site_url("/{$page_slug}/?token={$group_id}");
     $booking_url = site_url("/" . get_option('paguro_checkout_slug', 'prenotazione') . "/");
-    $apt_link = paguro_get_apartment_public_url($first->apartment_id ?? 0, $first->apt_url ?? '');
+    $apt_url = paguro_get_apartment_public_url($first->apartment_id ?? 0, $first->apt_url ?? '');
+    $apt_link = $apt_url;
+    $apt_link_html = paguro_build_apartment_link_placeholder(ucfirst($first->apt_name), $apt_url);
+    $discount_amount = floatval($totals['discount']);
+    $discount_amount_fmt = number_format($discount_amount, 0, ',', '.');
 
     $date_start = $active[0]->date_start;
     $date_end = $active[count($active) - 1]->date_end;
@@ -398,7 +429,12 @@ function paguro_get_group_email_placeholders($group_id) {
         'guest_phone' => $first->guest_phone,
         'apt_name' => ucfirst($first->apt_name),
         'apt_name_raw' => $first->apt_name,
+        'apt_url' => $apt_url,
         'apt_link' => $apt_link,
+        'apt_link_html' => $apt_link_html,
+        'admin_note' => '',
+        'admin_note_raw' => '',
+        'admin_note_block' => '',
         'date_start' => date('d/m/Y', strtotime($date_start)),
         'date_end' => date('d/m/Y', strtotime($date_end)),
         'date_start_raw' => $date_start,
@@ -408,8 +444,12 @@ function paguro_get_group_email_placeholders($group_id) {
         'count' => $totals['weeks_count'],
         'total_raw' => $totals['total_raw'],
         'total_raw_fmt' => number_format($totals['total_raw'], 0, ',', '.'),
-        'discount_amount' => $totals['discount'],
-        'discount_amount_fmt' => number_format($totals['discount'], 0, ',', '.'),
+        'discount_amount' => $discount_amount,
+        'discount_amount_fmt' => $discount_amount_fmt,
+        // Compat: alcuni template storici usano manual_discount* anche per il multi-settimana.
+        'manual_discount' => $discount_amount_fmt,
+        'manual_discount_fmt' => $discount_amount_fmt,
+        'manual_discount_raw' => $discount_amount,
         'total_cost_raw' => $totals['total_final'],
         'total_cost' => number_format($totals['total_final'], 0, ',', '.'),
         'total_cost_fmt' => number_format($totals['total_final'], 0, ',', '.'),
@@ -428,6 +468,62 @@ function paguro_get_group_email_placeholders($group_id) {
         'cancel_deadline_raw' => $cancel_deadline_raw,
         'admin_email' => get_option('admin_email')
     ];
+}
+
+if (!function_exists('paguro_dedupe_discount_placeholders_in_template')) {
+    /**
+     * Evita la doppia stampa dello sconto nei template legacy che affiancano
+     * {manual_discount_fmt} e {discount_amount_fmt} (ora hanno lo stesso valore).
+     * Usata sia dalle email sia dalla pagina riepilogo.
+     */
+    function paguro_dedupe_discount_placeholders_in_template($template)
+    {
+        $template = (string) $template;
+        if ($template === '') return $template;
+        $template = preg_replace('/\{manual_discount_fmt\}\s+\{discount_amount_fmt\}/i', '{discount_amount_fmt}', $template);
+        $template = preg_replace('/\{discount_amount_fmt\}\s+\{manual_discount_fmt\}/i', '{discount_amount_fmt}', $template);
+        return $template;
+    }
+}
+
+if (!function_exists('paguro_upgrade_apt_link_placeholder_in_template')) {
+    function paguro_upgrade_apt_link_placeholder_in_template($template)
+    {
+        $template = (string) $template;
+        if ($template === '') return $template;
+        // Compat: in testi tipo "nell'appartamento {apt_link}" usa il nuovo placeholder HTML con label.
+        $template = preg_replace("/(nell['’]appartamento\\s*)\\{apt_link\\}/iu", '$1{apt_link_html}', $template);
+        return paguro_dedupe_discount_placeholders_in_template($template);
+    }
+}
+
+if (!function_exists('paguro_get_admin_note_placeholders')) {
+    /**
+     * @param string $note_raw Testo già "unslashed" (wp_unslash va fatto una sola volta,
+     *                         nel punto in cui si legge $_POST).
+     */
+    function paguro_get_admin_note_placeholders($note_raw)
+    {
+        $note = sanitize_textarea_field((string) $note_raw);
+        $note = trim(preg_replace("/\r\n?/", "\n", $note));
+        $note_html = '';
+        $note_block = '';
+
+        if ($note !== '') {
+            $note_html = nl2br(esc_html($note));
+            $note_block =
+                '<div style="background:#fff8e1; border-left:4px solid #f59e0b; padding:12px 14px; margin:16px 0; border-radius:4px;">' .
+                '<strong>Nota importante:</strong><br>' . $note_html .
+                '</div>';
+        }
+
+        return [
+            // Il corpo email è HTML: {admin_note} è escapato, {admin_note_raw} resta testo semplice.
+            'admin_note' => $note_html,
+            'admin_note_raw' => $note,
+            'admin_note_block' => $note_block
+        ];
+    }
 }
 
 function paguro_get_admin_receipt_link($booking_id, $receipt_url = '') {
@@ -481,7 +577,7 @@ function paguro_append_gdpr_notice($body, $b) {
 // 1. QUOTE SUBMITTED - USER
 // =========================================================
 
-function paguro_send_quote_request_to_user($booking_id) {
+function paguro_send_quote_request_to_user($booking_id, $extra = []) {
     global $wpdb;
     
     $b = $wpdb->get_row($wpdb->prepare(
@@ -493,11 +589,13 @@ function paguro_send_quote_request_to_user($booking_id) {
     
     if (!$b || !is_email($b->guest_email)) return false;
     if (!empty($b->group_id) && function_exists('paguro_send_group_quote_request_to_user')) {
-        return paguro_send_group_quote_request_to_user($b->group_id);
+        return paguro_send_group_quote_request_to_user($b->group_id, $extra);
     }
     
     $placeholders = paguro_get_email_placeholders($b);
     $placeholders = paguro_strip_quote_sensitive_placeholders($placeholders);
+    $note_placeholders = paguro_get_admin_note_placeholders(is_array($extra) ? ($extra['admin_note'] ?? '') : '');
+    $placeholders = array_merge($placeholders, $note_placeholders);
     
     $subject = paguro_parse_template(
         get_option('paguro_txt_email_request_subj', 'Conferma Richiesta Preventivo: {apt_name}'),
@@ -512,6 +610,14 @@ function paguro_send_quote_request_to_user($booking_id) {
 	        'Per procedere con la conferma e visualizzare i dati per il bonifico, accedi alla tua area riservata:<br>' .
 	        '<a href="{link_riepilogo}" class="button">VAI ALLA TUA PRENOTAZIONE</a>'
 	    );
+        $template = paguro_upgrade_apt_link_placeholder_in_template($template);
+        if (
+            !empty($safe_placeholders['admin_note_block']) &&
+            stripos($template, '{admin_note_block}') === false &&
+            stripos($template, '{admin_note}') === false
+        ) {
+            $template .= '<br><br>{admin_note_block}';
+        }
 	
 	    if (stripos($template, '{link_riepilogo}') === false) {
 	        $template .= '<br><br><a href="{link_riepilogo}" class="button">Accedi alla tua prenotazione</a>';
@@ -938,10 +1044,12 @@ function paguro_send_group_receipt_received_to_admin($group_id) {
 // GROUP: QUOTE SUBMITTED
 // =========================================================
 
-function paguro_send_group_quote_request_to_user($group_id) {
+function paguro_send_group_quote_request_to_user($group_id, $extra = []) {
     $placeholders = paguro_get_group_email_placeholders($group_id);
     if (empty($placeholders) || !is_email($placeholders['guest_email'] ?? '')) return false;
     $placeholders = paguro_strip_quote_sensitive_placeholders($placeholders);
+    $note_placeholders = paguro_get_admin_note_placeholders(is_array($extra) ? ($extra['admin_note'] ?? '') : '');
+    $placeholders = array_merge($placeholders, $note_placeholders);
     $placeholders = paguro_escape_user_placeholders($placeholders);
 
     $subject = paguro_parse_template(
@@ -954,6 +1062,14 @@ function paguro_send_group_quote_request_to_user($group_id) {
         'Per procedere con la conferma e visualizzare i dati per il bonifico, accedi alla tua area riservata:<br>' .
         '<a href="{link_riepilogo}" class="button">VAI ALLA TUA PRENOTAZIONE</a>'
     );
+    $template = paguro_upgrade_apt_link_placeholder_in_template($template);
+    if (
+        !empty($placeholders['admin_note_block']) &&
+        stripos($template, '{admin_note_block}') === false &&
+        stripos($template, '{admin_note}') === false
+    ) {
+        $template .= '<br><br>{admin_note_block}';
+    }
 
     if (stripos($template, '{weeks_list}') === false) {
         $template .= '<br><br><strong>Settimane selezionate:</strong><br>{weeks_list}';

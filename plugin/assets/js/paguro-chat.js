@@ -97,6 +97,39 @@ jQuery(document).ready(function($) {
         });
     }
 
+    function resolveDefaultAptId(chatWindow, explicitAptId) {
+        var explicit = parseInt(explicitAptId, 10);
+        if (!isNaN(explicit) && explicit > 0) {
+            return explicit;
+        }
+
+        var readApt = function(el) {
+            if (!el || !el.length) return 0;
+            var fromData = parseInt(el.data('defaultAptId'), 10);
+            if (!isNaN(fromData) && fromData > 0) return fromData;
+            var fromAttr = parseInt(el.attr('data-default-apt-id'), 10);
+            if (!isNaN(fromAttr) && fromAttr > 0) return fromAttr;
+            return 0;
+        };
+
+        var selfApt = readApt(chatWindow);
+        if (selfApt > 0) {
+            return selfApt;
+        }
+
+        var windowApt = readApt(chatWindow.closest('.paguro-chat-window'));
+        if (windowApt > 0) {
+            return windowApt;
+        }
+
+        var rootApt = readApt(chatWindow.closest('.paguro-chat-root'));
+        if (rootApt > 0) {
+            return rootApt;
+        }
+
+        return '';
+    }
+
     // =========================================================
     // SEND MESSAGE TO BOT
     // =========================================================
@@ -107,6 +140,7 @@ jQuery(document).ready(function($) {
         var chatBody = chatWindow.find('.paguro-chat-body');
         var input = chatWindow.find('.paguro-input-field');
         var sendBtn = chatWindow.find('.paguro-send-btn');
+        var resolvedAptId = resolveDefaultAptId(chatWindow, aptId);
         if (offset === 0) appendUserMsg(chatBody, msg);
         var pendingId = appendPendingBotMsg(chatBody, 'Paguro sta verificando');
         var sessionId = (analytics && typeof analytics.getSessionId === 'function')
@@ -125,7 +159,7 @@ jQuery(document).ready(function($) {
                 session_id: sessionId,
                 offset: offset,
                 filter_month: month,
-                apt_id: aptId,
+                apt_id: resolvedAptId,
                 direct_action: directAction ? 1 : 0,
                 page_path: window.location.pathname || '',
                 page_type: 'chat'
